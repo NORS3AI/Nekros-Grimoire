@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <!-- Prevent pinch/double-tap zoom on mobile & iPad -->
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#1a0b2e" />
+  <title>Nekro's Grimoire</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="welcome-back" class="welcome-back hidden"></div>
+
+  <header class="topbar">
+    <div class="stat stat-runes">
+      <span class="stat-icon">✦</span>
+      <span>
+        <span id="rune-count" class="rune-count">0</span>
+        <span class="stat-label">Runes</span>
+      </span>
+    </div>
+
+    <div class="stat stat-comprehension" id="comprehension-stat">
+      <span class="stat-icon">✷</span>
+      <span>
+        <span id="comprehension-count" class="comprehension-count">0</span>
+        <span class="stat-label">Comprehension</span>
+        <span id="comprehension-bonus" class="comprehension-bonus"></span>
+      </span>
+      <div class="comp-progress">
+        <div id="comp-progress-bar" class="comp-progress-bar"></div>
+      </div>
+    </div>
+
+    <div class="stat stat-rates">
+      <span><span id="per-tap" class="rate-val">0.33</span><span class="stat-label">/ tap</span></span>
+      <span><span id="per-sec" class="rate-val">0</span><span class="stat-label">/ sec</span></span>
+      <span id="crit-stat" class="crit-stat hidden"></span>
+    </div>
+  </header>
+
+  <main class="stage">
+    <h1 class="grimoire-title">The Necromancer's Grimoire</h1>
+    <p class="grimoire-hint" id="grimoire-hint">Tap the glowing turquoise rune to decipher it. Three taps reveal a rune.</p>
+    <div id="rune-grid" class="rune-grid" aria-label="Grimoire page"></div>
+    <div id="float-layer" class="float-layer"></div>
+  </main>
+
+  <aside class="panel">
+    <div class="tabs">
+      <button class="tab active" data-tab="upgrades">Upgrades</button>
+      <button class="tab" data-tab="research" id="research-tab" disabled>Research 🔒</button>
+    </div>
+
+    <div class="tab-content" id="tab-upgrades">
+      <div id="upgrades-list" class="list"></div>
+      <p class="empty-hint" id="upgrades-empty">Gather <b>10</b> runes to unlock your first upgrade…</p>
+    </div>
+
+    <div class="tab-content hidden" id="tab-research">
+      <p class="research-intro">Spend runes on permanent arcane research. Read each effect carefully — multipliers compound!</p>
+      <div id="research-list" class="list"></div>
+    </div>
+
+    <div class="panel-footer">
+      <button id="reset-btn" class="reset-btn">Reset Save</button>
+      <span id="save-indicator" class="save-indicator"></span>
+    </div>
+  </aside>
+
+  <script src="game.js"></script>
+</body>
+</html>
