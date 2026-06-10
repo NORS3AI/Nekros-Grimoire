@@ -283,7 +283,13 @@ body {
 .tab:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .tab-content { flex: 1; overflow-y: auto; padding: 14px; min-height: 0; }
-.research-intro { color: var(--ink-dim); font-size: 0.8rem; margin: 0 0 12px; }
+.research-intro { color: var(--ink-dim); font-size: 0.8rem; margin: 0 0 10px; }
+.research-filter {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 0.82rem; color: var(--ink-dim);
+  margin: 0 0 12px; cursor: pointer; user-select: none;
+}
+.research-filter input { width: 16px; height: 16px; cursor: pointer; accent-color: var(--turquoise); }
 .empty-hint { color: var(--ink-dim); font-size: 0.85rem; text-align: center; margin-top: 30px; }
 
 .list { display: flex; flex-direction: column; gap: 10px; }

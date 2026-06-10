@@ -143,6 +143,7 @@ let state = {
     tapColor: "#2ee6d6",
     muteAll: false,
     muteMusic: false,
+    hidePurchased: false,
   },
 
   // dev control panel overrides
@@ -432,6 +433,7 @@ function renderUpgrades() {
 function renderResearch() {
   if (dirty) recompute();
   const list = $("#research-list");
+  const hidePurchased = !!(state.settings && state.settings.hidePurchased);
   list.innerHTML = "";
   for (const r of RESEARCH) {
     const L = state.research[r.id] | 0;
@@ -440,6 +442,11 @@ function renderResearch() {
 
     const unlocked = state.lifetimeRunes >= r.unlock;
     const maxed = L >= researchMax(r);
+
+    // "purchased" = a one-time research that's owned, or a repeatable that's maxed
+    const purchased = r.repeat ? maxed : L > 0;
+    if (hidePurchased && purchased) continue;
+
     const cost = researchCost(r);
     const repeatTag = r.repeat ? '<span class="tag repeat">repeatable</span>' : "";
     list.appendChild(makeCard({
@@ -754,6 +761,14 @@ function initSettingsUI() {
     state.settings.tapColor = "#2ee6d6";
     runeC.value = "#2ee6d6"; tapC.value = "#2ee6d6";
     applySettings();
+  });
+
+  // Research: hide purchased upgrades
+  const hidePurchased = $("#hide-purchased");
+  hidePurchased.checked = !!state.settings.hidePurchased;
+  hidePurchased.addEventListener("change", () => {
+    state.settings.hidePurchased = hidePurchased.checked;
+    renderResearch();
   });
 }
 
