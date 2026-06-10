@@ -3,16 +3,22 @@
 An idle / clicker / instant-gratification game about deciphering the text of the
 Necromancer's Grimoire.
 
-## Play
+## ▶ Play now
 
-Just open `index.html` in any modern browser — there is no build step.
+**[Play Nekro's Grimoire →](https://nors3ai.github.io/Nekros-Grimoire/)**
+
+Hosted free via GitHub Pages (served from the [`/docs`](docs) folder).
+
+## Play locally
+
+Open `docs/index.html` in any modern browser — there is no build step.
 Progress is saved automatically to your browser's `localStorage`, and the tome
 keeps writing runes while you're away (idle income, capped at 4 hours offline).
 
 To run a tiny local server instead (recommended on iPad/mobile):
 
 ```bash
-python3 -m http.server 8000
+cd docs && python3 -m http.server 8000
 # then visit http://localhost:8000
 ```
 
