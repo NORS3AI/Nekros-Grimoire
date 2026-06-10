@@ -48,8 +48,9 @@ body {
   grid-template-areas:
     "topbar topbar"
     "stage  panel";
-  min-height: 100vh;
-  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;            /* the page itself never scrolls */
 }
 
 /* ===== Top bar ===== */
@@ -132,10 +133,12 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-start;
-  padding: 18px 18px 30px;
+  justify-content: center;     /* center the grimoire in the available space */
+  gap: 4px;
+  padding: 12px 16px;
   position: relative;
   overflow: hidden;
+  min-height: 0;               /* allow the stage to shrink instead of overflowing */
 }
 
 .grimoire-title {
@@ -157,9 +160,13 @@ body {
 .rune-grid {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
+  grid-template-rows: repeat(6, 1fr);
   gap: clamp(4px, 1.5vw, 12px);
-  width: min(560px, 92%);
-  aspect-ratio: 1 / 1;
+  /* fallback square that always fits the smaller viewport side;
+     JS (sizeGrid) refines this to fit the real available space */
+  width: min(78vmin, 560px);
+  height: min(78vmin, 560px);
+  flex: 0 0 auto;
   padding: clamp(10px, 3vw, 22px);
   border-radius: 18px;
   background:
@@ -319,11 +326,19 @@ body {
       "topbar"
       "stage"
       "panel";
-    grid-template-rows: auto auto 1fr;
+    /* stage flexes & shrinks; panel takes a fixed slice and scrolls inside */
+    grid-template-rows: auto minmax(0, 1fr) auto;
   }
-  .panel { border-left: none; border-top: 1px solid var(--border); max-height: 50vh; }
+  .panel {
+    border-left: none;
+    border-top: 1px solid var(--border);
+    height: 44vh;
+    height: 44dvh;
+    min-height: 0;
+  }
   .topbar { justify-content: space-around; gap: 6px; }
   .rune-count { font-size: 1.5rem; }
   .comprehension-count { font-size: 1.2rem; }
-  .grimoire-title { margin-top: 2px; }
+  .grimoire-title { margin-top: 2px; font-size: clamp(1rem, 4vw, 1.4rem); }
+  .grimoire-hint { font-size: 0.78rem; margin-bottom: 8px; }
 }

@@ -5,7 +5,7 @@ Necromancer's Grimoire.
 
 ## ▶ Play now
 
-**[Play Nekro's Grimoire →](https://nors3ai.github.io/Nekros-Grimoire/)**
+https://nors3ai.github.io/Nekros-Grimoire/
 
 Hosted free via GitHub Pages (served from the [`/docs`](docs) folder).
 
