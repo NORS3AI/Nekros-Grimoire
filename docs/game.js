@@ -337,13 +337,12 @@ function onCellTap(i, ev) {
   let crit = false;
   if (d.critMult > 0 && Math.random() < d.critChance) { val *= d.critMult; crit = true; }
 
-  // one tap = one rune; the glowing rune stays put and just deciphers a new
-  // glyph in place, so it never runs away from your finger
+  // one tap = one rune, and the glowing rune jumps to a new random cell
   addRunes(val);
   state.lifetimeTaps++;
   spawnFloat(ev, val, crit);
   Sound.tap(crit);
-  cells[activeCell].textContent = randGlyph();
+  rerollActive();
 
   updateTop();
   maybeRefreshPanels();
@@ -862,8 +861,13 @@ function renderStats() {
    ===================================================================== */
 const PATCH_NOTES = [
   {
+    v: "1.4.1", when: "2026-06-10", notes: [
+      "The glowing rune now jumps to a new random spot with every tap again.",
+    ],
+  },
+  {
     v: "1.4.0", when: "2026-06-10", notes: [
-      "One tap now grants a full rune (no more three taps per rune). The glowing rune stays in place and deciphers a new glyph with each tap.",
+      "One tap now grants a full rune (no more three taps per rune).",
     ],
   },
   {
