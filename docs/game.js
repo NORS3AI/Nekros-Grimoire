@@ -410,32 +410,95 @@ function updateTop() {
   }
 }
 
-let upgradesBuilt = false;
+/* ---------- persistent card system ----------
+   Cards are created once and then updated in place (never rebuilt), so
+   tapping the same upgrade repeatedly always lands on the same button
+   instead of mis-tapping a freshly recreated element. */
+const cardRegistry = new Map();
+
+function ensureCard(key) {
+  let entry = cardRegistry.get(key);
+  if (entry) return entry;
+  const btn = document.createElement("button");
+  btn.className = "card";
+  btn.dataset.cardKey = key;
+  btn.innerHTML =
+    '<div class="card-head"><span class="card-name"></span><span class="card-level"></span></div>' +
+    '<div class="card-desc"></div><span class="card-cost"></span>';
+  const refs = {
+    name: btn.querySelector(".card-name"),
+    level: btn.querySelector(".card-level"),
+    desc: btn.querySelector(".card-desc"),
+    cost: btn.querySelector(".card-cost"),
+  };
+  entry = { btn, refs, onBuy: null };
+  btn.addEventListener("click", () => { if (!btn.disabled && entry.onBuy) entry.onBuy(); });
+  cardRegistry.set(key, entry);
+  return entry;
+}
+
+function updateCardEntry(entry, o) {
+  const { btn, refs } = entry;
+  entry.onBuy = o.onBuy || null;
+  const affordable = !o.locked && !o.maxed && state.runes >= o.cost;
+  btn.classList.toggle("affordable", affordable);
+  btn.classList.toggle("locked", !!o.locked);
+  btn.classList.toggle("maxed", !!o.maxed);
+  btn.disabled = !!(o.locked || o.maxed || !affordable);
+
+  const nameHtml = o.name + (o.tag || "");
+  if (refs.name.innerHTML !== nameHtml) refs.name.innerHTML = nameHtml;
+  const levelLabel = o.levelText !== undefined ? o.levelText
+    : (typeof o.level === "number" && o.level > 0 ? `Lv ${o.level}` : "");
+  if (refs.level.textContent !== levelLabel) refs.level.textContent = levelLabel;
+  if (refs.desc.textContent !== o.desc) refs.desc.textContent = o.desc;
+
+  let costClass, costText;
+  if (o.maxed) { costClass = "card-cost lock"; costText = "MAX"; }
+  else if (o.locked) { costClass = "card-cost lock"; costText = o.lockText || ""; }
+  else { costClass = "card-cost " + (affordable ? "ok" : "no"); costText = "✦ " + fmt(o.cost) + " runes"; }
+  if (refs.cost.className !== costClass) refs.cost.className = costClass;
+  if (refs.cost.textContent !== costText) refs.cost.textContent = costText;
+}
+
+/* reconcile a list's children to match `items` (ordered) without recreating
+   buttons that are still present */
+function syncList(listEl, items) {
+  const wanted = new Set(items.map(i => i.key));
+  Array.from(listEl.children).forEach(ch => {
+    if (!wanted.has(ch.dataset.cardKey)) listEl.removeChild(ch);
+  });
+  items.forEach((item, idx) => {
+    const entry = ensureCard(item.key);
+    updateCardEntry(entry, item.data);
+    if (listEl.children[idx] !== entry.btn) listEl.insertBefore(entry.btn, listEl.children[idx] || null);
+  });
+}
+
 function renderUpgrades() {
   if (dirty) recompute();
-  const list = $("#upgrades-list");
   const showProf = state.lifetimeRunes >= 10 || state.proficiency > 0;
   const showFlow = state.lifetimeRunes >= 100 || state.flow > 0;
   $("#upgrades-empty").classList.toggle("hidden", showProf);
 
-  list.innerHTML = "";
-  if (showProf) list.appendChild(makeCard({
+  const items = [];
+  if (showProf) items.push({ key: "up-prof", data: {
     name: "Proficiency", level: state.proficiency,
     desc: `+${fmt(PROF_ADD)} rune per tap (before multipliers). Each level adds flat tap power.`,
     cost: proficiencyCost(), onBuy: buyProficiency, tag: '<span class="tag add">additive</span>'
-  }));
-  if (showFlow) list.appendChild(makeCard({
+  } });
+  if (showFlow) items.push({ key: "up-flow", data: {
     name: "Flow", level: state.flow,
     desc: `+${fmt(FLOW_ADD)} rune per second (before multipliers). Passive income, even while idle.`,
     cost: flowCost(), onBuy: buyFlow, tag: '<span class="tag add">additive</span>'
-  }));
+  } });
+  syncList($("#upgrades-list"), items);
 }
 
 function renderResearch() {
   if (dirty) recompute();
-  const list = $("#research-list");
   const hidePurchased = !!(state.settings && state.settings.hidePurchased);
-  list.innerHTML = "";
+  const items = [];
   for (const r of RESEARCH) {
     const L = state.research[r.id] | 0;
     const revealed = state.lifetimeRunes >= r.unlock * 0.5 || L > 0;
@@ -448,47 +511,20 @@ function renderResearch() {
     const purchased = r.repeat ? maxed : L > 0;
     if (hidePurchased && purchased) continue;
 
-    const cost = researchCost(r);
     const repeatTag = r.repeat ? '<span class="tag repeat">repeatable</span>' : "";
-    list.appendChild(makeCard({
+    items.push({ key: "rs-" + r.id, data: {
       name: r.name,
-      level: r.repeat ? L : (L > 0 ? "✓" : 0),
       levelText: r.repeat ? `Lv ${L}${isFinite(researchMax(r)) ? "/" + researchMax(r) : ""}` : (L > 0 ? "Researched" : ""),
       desc: r.desc,
-      cost,
+      cost: researchCost(r),
       locked: !unlocked,
       lockText: !unlocked ? `🔒 Unlocks at ${fmt(r.unlock)} lifetime runes` : null,
       maxed,
       onBuy: () => buyResearch(r),
       tag: effectTag(r) + repeatTag,
-    }));
+    } });
   }
-}
-
-function makeCard(o) {
-  const btn = document.createElement("button");
-  btn.className = "card";
-  const affordable = !o.locked && !o.maxed && state.runes >= o.cost;
-  if (affordable) btn.classList.add("affordable");
-  if (o.locked) btn.classList.add("locked");
-  if (o.maxed) btn.classList.add("maxed");
-  btn.disabled = o.locked || o.maxed || !affordable;
-
-  let costHtml;
-  if (o.maxed) costHtml = `<span class="card-cost lock">MAX</span>`;
-  else if (o.locked) costHtml = `<span class="card-cost lock">${o.lockText}</span>`;
-  else costHtml = `<span class="card-cost ${affordable ? "ok" : "no"}">✦ ${fmt(o.cost)} runes</span>`;
-
-  const levelLabel = o.levelText !== undefined ? o.levelText
-    : (typeof o.level === "number" && o.level > 0 ? `Lv ${o.level}` : "");
-
-  btn.innerHTML =
-    `<div class="card-head"><span class="card-name">${o.name}${o.tag || ""}</span>` +
-    `<span class="card-level">${levelLabel}</span></div>` +
-    `<div class="card-desc">${o.desc}</div>` + costHtml;
-
-  if (!btn.disabled && o.onBuy) btn.addEventListener("click", o.onBuy);
-  return btn;
+  syncList($("#research-list"), items);
 }
 
 /* unlock the research tab once first comprehension is earned */
@@ -617,11 +653,13 @@ function loop(now) {
 /* ---------- extra zoom guards (iOS Safari ignores user-scalable) ---------- */
 ["gesturestart", "gesturechange", "gestureend"].forEach(evt =>
   document.addEventListener(evt, (e) => e.preventDefault(), { passive: false }));
-// block double-tap zoom fallback
+// block double-tap zoom fallback — but never swallow rapid taps on buttons /
+// inputs, so repeatedly tapping an upgrade keeps buying instead of mis-tapping
 let lastTouchEnd = 0;
 document.addEventListener("touchend", (e) => {
   const now = Date.now();
-  if (now - lastTouchEnd <= 300) e.preventDefault();
+  const interactive = e.target.closest && e.target.closest("button, input, label, select, textarea, a, .card");
+  if (!interactive && now - lastTouchEnd <= 300) e.preventDefault();
   lastTouchEnd = now;
 }, { passive: false });
 // block ctrl/cmd + wheel zoom on desktop
@@ -860,6 +898,11 @@ function renderStats() {
    Patch Notes  — keep newest at the top; add an entry with every patch.
    ===================================================================== */
 const PATCH_NOTES = [
+  {
+    v: "1.5.0", when: "2026-06-10", notes: [
+      "Tapping an upgrade or research repeatedly now keeps buying it instead of mis-tapping — the cards are updated in place rather than rebuilt, and rapid taps on buttons are no longer swallowed by the zoom guard.",
+    ],
+  },
   {
     v: "1.4.1", when: "2026-06-10", notes: [
       "The glowing rune now jumps to a new random spot with every tap again.",
