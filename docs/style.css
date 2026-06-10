@@ -20,6 +20,11 @@
 
 * { box-sizing: border-box; }
 
+html {
+  height: 100%;
+  overflow: hidden;            /* the document never scrolls */
+}
+
 html, body {
   margin: 0;
   padding: 0;
@@ -42,6 +47,9 @@ html, body {
 }
 
 body {
+  /* pin the whole app to the viewport — no document scroll, no rubber-band */
+  position: fixed;
+  inset: 0;
   display: grid;
   grid-template-rows: auto 1fr;
   grid-template-columns: 1fr minmax(280px, 360px);
