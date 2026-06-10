@@ -41,15 +41,24 @@ function profBaseCost(level) {
 /* Flow cost: 100, 200, 400, 800 ... doubles each level */
 function flowBaseCost(level) { return 100 * Math.pow(2, level); }
 
-/* Comprehension thresholds (cumulative lifetime runes). Explicit start,
-   then the increment keeps growing ~12% so it continues forever. */
-const COMP_SEQ = [300, 500, 800, 1200, 1600, 2000, 2500, 3000, 3500, 4300];
+/* Comprehension thresholds (cumulative lifetime runes).
+   Levels 1-4 are hand-set. From level 5 each threshold grows geometrically,
+   and the growth ratio itself accelerates 8% per level — so reaching
+   double-digit Comprehension is a genuine long-term goal. */
+const COMP_SEQ = [300, 500, 800, 1200];   // levels 1-4
+const COMP_START_RATIO = 1.7;             // size of the first jump after level 4
+const COMP_RATIO_ACCEL = 1.08;            // ratio grows 8% each level after level 4
 const compCache = COMP_SEQ.slice();
+function roundNice(n) {
+  if (n < 1000) return Math.round(n / 10) * 10;
+  const mag = Math.pow(10, Math.floor(Math.log10(n)) - 2); // keep ~3 significant figures
+  return Math.round(n / mag) * mag;
+}
 function compThreshold(i) {
   while (compCache.length <= i) {
-    const n = compCache.length;
-    const inc = Math.max(100, Math.round((compCache[n - 1] - compCache[n - 2]) * 1.12 / 100) * 100);
-    compCache.push(compCache[n - 1] + inc);
+    const n = compCache.length;            // 0-indexed level being added (n>=4)
+    const ratio = COMP_START_RATIO * Math.pow(COMP_RATIO_ACCEL, n - 4);
+    compCache.push(roundNice(compCache[n - 1] * ratio));
   }
   return compCache[i];
 }
@@ -575,6 +584,22 @@ $("#reset-btn").addEventListener("click", () => {
   location.reload();
 });
 
+/* ---------- idle accrual ----------
+   Idle (per-second) runes are granted from REAL elapsed wall-clock time, not
+   animation frames, so they keep accruing while the tab is unfocused or in the
+   background. A 1s interval ticks it even when requestAnimationFrame is paused,
+   and the real-time delta means any frozen gap is caught up on return. */
+let lastIdle = Date.now();
+function accrueIdle() {
+  if (dirty || lifetimeTapEnabled) recompute();
+  const now = Date.now();
+  let sec = (now - lastIdle) / 1000;
+  lastIdle = now;
+  if (sec <= 0) return;
+  sec = Math.min(sec, OFFLINE_CAP_SEC);
+  if (d.idlePerSec > 0) addRunes(d.idlePerSec * sec);
+}
+
 /* ---------- main loop ---------- */
 let lastFrame = performance.now();
 let panelAccum = 0;
@@ -583,7 +608,7 @@ function loop(now) {
   lastFrame = now;
   if (!document.hidden) state.playTimeMs += dt * 1000;
   if (dirty || lifetimeTapEnabled) recompute();
-  if (d.idlePerSec > 0) addRunes(d.idlePerSec * dt);
+  accrueIdle();
   updateTop();
   checkResearchUnlock();
   // keep card states (affordability/unlocks) live during idle income
@@ -844,6 +869,13 @@ function renderStats() {
    ===================================================================== */
 const PATCH_NOTES = [
   {
+    v: "1.3.0", when: "2026-06-10", notes: [
+      "Retuned Comprehension: levels 1–4 are unchanged, but from level 5 the cost ramps up much faster (the growth accelerates 8% per level), so high Comprehension is now a real long-term goal.",
+      "Added a 'Hide purchased upgrades' checkbox to the Research tab.",
+      "Idle runes now keep accruing while the tab is in the background or unfocused.",
+    ],
+  },
+  {
     v: "1.2.0", when: "2026-06-10", notes: [
       "Added Settings: customise the rune colour and the tap-number colour.",
       "Added mute toggles for all sound and for music.",
@@ -988,7 +1020,13 @@ function init() {
   renderPatchNotes();
 
   setInterval(save, 10000);
-  document.addEventListener("visibilitychange", () => { if (document.hidden) save(); });
+  // keep gathering idle runes in the background (rAF is paused when hidden)
+  lastIdle = Date.now();
+  setInterval(accrueIdle, 1000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) { accrueIdle(); save(); }
+    else { accrueIdle(); lastFrame = performance.now(); updateTop(); }
+  });
   window.addEventListener("beforeunload", save);
 
   requestAnimationFrame(loop);
