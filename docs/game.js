@@ -16,7 +16,7 @@
 "use strict";
 
 /* ---------- constants ---------- */
-const BASE_TAP = 1 / 3;            // three taps grant one rune
+const BASE_TAP = 1;                // one tap grants one rune
 const PROF_ADD = 0.1;              // Proficiency: +0.1 rune / tap per level
 const FLOW_ADD = 1;                // Flow: +1 rune / second per level
 const COMP_BASE_PCT = 0.05;        // each Comprehension = +5% all rune gain (base)
@@ -282,8 +282,6 @@ const grid = $("#rune-grid");
 const floatLayer = $("#float-layer");
 let cells = [];
 let activeCell = 0;
-let tapsOnRune = 0;          // the glowing rune stays put until it's deciphered
-const TAPS_PER_RUNE = 3;     // "three taps grants 1 rune", then it moves on
 
 /* ---------- grid / tapping ---------- */
 function randGlyph() { return RUNE_GLYPHS[(Math.random() * RUNE_GLYPHS.length) | 0]; }
@@ -321,7 +319,6 @@ function sizeGrid() {
 }
 
 function rerollActive() {
-  tapsOnRune = 0;
   if (cells[activeCell]) cells[activeCell].classList.remove("active");
   let next = activeCell;
   while (next === activeCell && cells.length > 1) next = (Math.random() * cells.length) | 0;
@@ -340,17 +337,13 @@ function onCellTap(i, ev) {
   let crit = false;
   if (d.critMult > 0 && Math.random() < d.critChance) { val *= d.critMult; crit = true; }
 
+  // one tap = one rune; the glowing rune stays put and just deciphers a new
+  // glyph in place, so it never runs away from your finger
   addRunes(val);
   state.lifetimeTaps++;
   spawnFloat(ev, val, crit);
   Sound.tap(crit);
-
-  // the glowing rune stays in place; it only moves once deciphered (3 taps)
-  tapsOnRune++;
-  if (tapsOnRune >= TAPS_PER_RUNE) {
-    tapsOnRune = 0;
-    rerollActive();
-  }
+  cells[activeCell].textContent = randGlyph();
 
   updateTop();
   maybeRefreshPanels();
@@ -868,6 +861,11 @@ function renderStats() {
    Patch Notes  — keep newest at the top; add an entry with every patch.
    ===================================================================== */
 const PATCH_NOTES = [
+  {
+    v: "1.4.0", when: "2026-06-10", notes: [
+      "One tap now grants a full rune (no more three taps per rune). The glowing rune stays in place and deciphers a new glyph with each tap.",
+    ],
+  },
   {
     v: "1.3.0", when: "2026-06-10", notes: [
       "Retuned Comprehension: levels 1–4 are unchanged, but from level 5 the cost ramps up much faster (the growth accelerates 8% per level), so high Comprehension is now a real long-term goal.",
