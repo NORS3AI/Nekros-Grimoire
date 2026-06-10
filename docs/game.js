@@ -245,6 +245,8 @@ const grid = $("#rune-grid");
 const floatLayer = $("#float-layer");
 let cells = [];
 let activeCell = 0;
+let tapsOnRune = 0;          // the glowing rune stays put until it's deciphered
+const TAPS_PER_RUNE = 3;     // "three taps grants 1 rune", then it moves on
 
 /* ---------- grid / tapping ---------- */
 function randGlyph() { return RUNE_GLYPHS[(Math.random() * RUNE_GLYPHS.length) | 0]; }
@@ -282,6 +284,7 @@ function sizeGrid() {
 }
 
 function rerollActive() {
+  tapsOnRune = 0;
   if (cells[activeCell]) cells[activeCell].classList.remove("active");
   let next = activeCell;
   while (next === activeCell && cells.length > 1) next = (Math.random() * cells.length) | 0;
@@ -303,7 +306,14 @@ function onCellTap(i, ev) {
   addRunes(val);
   state.lifetimeTaps++;
   spawnFloat(ev, val, crit);
-  rerollActive();
+
+  // the glowing rune stays in place; it only moves once deciphered (3 taps)
+  tapsOnRune++;
+  if (tapsOnRune >= TAPS_PER_RUNE) {
+    tapsOnRune = 0;
+    rerollActive();
+  }
+
   updateTop();
   maybeRefreshPanels();
 }
