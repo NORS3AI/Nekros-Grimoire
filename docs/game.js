@@ -263,6 +263,24 @@ function buildGrid() {
   rerollActive();
 }
 
+/* size the rune grid to the actual free space so nothing is ever cut off
+   at the bottom and the whole game fits on one screen (no page scroll) */
+function sizeGrid() {
+  const stage = document.querySelector(".stage");
+  if (!stage) return;
+  const title = document.querySelector(".grimoire-title");
+  const hint = document.querySelector(".grimoire-hint");
+  const cs = getComputedStyle(stage);
+  const padV = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+  const padH = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+  const usedV = (title ? title.offsetHeight : 0) + (hint ? hint.offsetHeight : 0) + 16;
+  const availH = stage.clientHeight - padV - usedV;
+  const availW = stage.clientWidth - padH;
+  const size = Math.max(140, Math.min(availW, availH, 560));
+  grid.style.width = size + "px";
+  grid.style.height = size + "px";
+}
+
 function rerollActive() {
   if (cells[activeCell]) cells[activeCell].classList.remove("active");
   let next = activeCell;
@@ -539,6 +557,17 @@ function init() {
   recompute();
   applyOffline();
   refreshAll();
+  sizeGrid();
+
+  // keep the board fitted to the viewport on resize / rotate / toolbar changes
+  let raf;
+  const refit = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(sizeGrid); };
+  window.addEventListener("resize", refit);
+  window.addEventListener("orientationchange", refit);
+  if (window.visualViewport) window.visualViewport.addEventListener("resize", refit);
+  // re-fit after fonts/layout settle
+  setTimeout(sizeGrid, 50);
+  setTimeout(sizeGrid, 300);
 
   setInterval(save, 10000);
   document.addEventListener("visibilitychange", () => { if (document.hidden) save(); });
