@@ -23,15 +23,17 @@
       </span>
     </div>
 
-    <div class="stat stat-comprehension" id="comprehension-stat">
-      <span class="stat-icon">✷</span>
-      <span>
-        <span id="comprehension-count" class="comprehension-count">0</span>
-        <span class="stat-label">Comprehension</span>
+    <div class="header-center">
+      <h1 class="game-title">The Necromancer's Grimoire</h1>
+      <div class="stat stat-comprehension" id="comprehension-stat">
+        <div class="comp-line">
+          <span id="comprehension-count" class="comprehension-count">0</span>
+          <span class="stat-label">Comprehension</span>
+        </div>
         <span id="comprehension-bonus" class="comprehension-bonus"></span>
-      </span>
-      <div class="comp-progress">
-        <div id="comp-progress-bar" class="comp-progress-bar"></div>
+        <div class="comp-progress">
+          <div id="comp-progress-bar" class="comp-progress-bar"></div>
+        </div>
       </div>
     </div>
 
@@ -43,8 +45,7 @@
   </header>
 
   <main class="stage">
-    <h1 class="grimoire-title">The Necromancer's Grimoire</h1>
-    <p class="grimoire-hint" id="grimoire-hint">Tap the glowing turquoise rune to decipher it. Three taps reveal a rune.</p>
+    <p class="grimoire-hint" id="grimoire-hint">Tap the glowing rune to decipher it.</p>
     <div id="rune-grid" class="rune-grid" aria-label="Grimoire page"></div>
     <div id="float-layer" class="float-layer"></div>
   </main>
@@ -66,10 +67,112 @@
     </div>
 
     <div class="panel-footer">
-      <button id="reset-btn" class="reset-btn">Reset Save</button>
+      <button class="footer-btn" data-modal="settings" title="Settings" aria-label="Settings">⚙</button>
+      <button class="footer-btn" data-modal="stats" title="Stats" aria-label="Stats">📊</button>
+      <button class="footer-btn" data-modal="patch" title="Patch Notes" aria-label="Patch Notes">📜</button>
+      <button class="footer-btn" data-modal="dev" title="Developer" aria-label="Developer">🛠</button>
+      <button id="reset-btn" class="reset-btn">Reset</button>
       <span id="save-indicator" class="save-indicator"></span>
     </div>
   </aside>
+
+  <!-- ===== Modals ===== -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+
+    <!-- Settings -->
+    <div class="modal hidden" id="modal-settings">
+      <div class="modal-head">
+        <h2>Settings</h2>
+        <button class="modal-close" data-close aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="setting-row">
+          <label for="set-rune-color">Rune color</label>
+          <input type="color" id="set-rune-color" value="#2ee6d6" />
+        </div>
+        <div class="setting-row">
+          <label for="set-tap-color">Tap number color <span class="muted">(the “+xx” pop)</span></label>
+          <input type="color" id="set-tap-color" value="#2ee6d6" />
+        </div>
+        <div class="setting-row">
+          <label for="set-mute-all">Mute all sound</label>
+          <input type="checkbox" id="set-mute-all" />
+        </div>
+        <div class="setting-row">
+          <label for="set-mute-music">Mute music</label>
+          <input type="checkbox" id="set-mute-music" />
+        </div>
+        <button class="ghost-btn" id="reset-colors-btn">Reset colors to default</button>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="modal hidden" id="modal-stats">
+      <div class="modal-head">
+        <h2>Stats</h2>
+        <button class="modal-close" data-close aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body" id="stats-body"></div>
+    </div>
+
+    <!-- Patch Notes -->
+    <div class="modal hidden" id="modal-patch">
+      <div class="modal-head">
+        <h2>Patch Notes</h2>
+        <button class="modal-close" data-close aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body" id="patch-body"></div>
+    </div>
+
+    <!-- Dev Control Panel -->
+    <div class="modal hidden" id="modal-dev">
+      <div class="modal-head">
+        <h2>Dev Control Panel</h2>
+        <button class="modal-close" data-close aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="dev-lock">
+          <p class="dev-prompt">Enter access code</p>
+          <div class="keypad-display" id="keypad-display"></div>
+          <div class="keypad" id="keypad"></div>
+          <p class="keypad-msg" id="keypad-msg"></p>
+        </div>
+
+        <div id="dev-controls" class="hidden">
+          <div class="dev-group">
+            <h3>Tap multiplier</h3>
+            <div class="dev-btns" id="dev-tapmult"></div>
+            <p class="muted" id="dev-tapmult-cur"></p>
+          </div>
+
+          <div class="dev-group">
+            <h3>Bonus Runes / second</h3>
+            <div class="dev-btns" id="dev-rps"></div>
+            <div class="dev-custom">
+              <input type="number" id="dev-rps-custom" placeholder="set exact /sec" />
+              <button class="ghost-btn" id="dev-rps-set">Set</button>
+            </div>
+            <p class="muted" id="dev-rps-cur"></p>
+          </div>
+
+          <div class="dev-group">
+            <h3>Add Runes</h3>
+            <div class="dev-btns" id="dev-runes"></div>
+            <div class="dev-custom">
+              <input type="number" id="dev-runes-custom" placeholder="custom amount" />
+              <button class="ghost-btn" id="dev-runes-add">Add</button>
+            </div>
+          </div>
+
+          <div class="dev-group">
+            <h3>Add Comprehension</h3>
+            <div class="dev-btns" id="dev-comp"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
 
   <script src="game.js"></script>
 </body>

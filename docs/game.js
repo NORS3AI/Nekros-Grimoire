@@ -131,6 +131,25 @@ let state = {
   flow: 0,
   research: {},          // id -> level
   lastSave: Date.now(),
+
+  // play-time & progression stats
+  playTimeMs: 0,
+  rebirths: 0,
+  rebirthUnlocked: false,
+
+  // player settings
+  settings: {
+    runeColor: "#2ee6d6",
+    tapColor: "#2ee6d6",
+    muteAll: false,
+    muteMusic: false,
+  },
+
+  // dev control panel overrides
+  dev: {
+    tapMult: 1,
+    rpsBonus: 0,
+  },
 };
 
 /* derived values, recomputed when something changes */
@@ -191,8 +210,12 @@ function recompute() {
   const compMult = 1 + compPct * state.comprehension;
 
   const allGroup = allMult * (1 + allPct / 100) * compMult;
-  d.tapValue  = (BASE_TAP + tapAdd) * tapMult * (1 + tapPct / 100) * lifeMult * allGroup;
-  d.idlePerSec = idleAdd * idleMult * (1 + idlePct / 100) * allGroup;
+  const devTapMult = (state.dev && state.dev.tapMult) || 1;
+  const tapGroup = tapMult * (1 + tapPct / 100) * lifeMult * devTapMult;
+  const idleGroup = idleMult * (1 + idlePct / 100);
+
+  d.tapValue  = (BASE_TAP + tapAdd) * tapGroup * allGroup;
+  d.idlePerSec = idleAdd * idleGroup * allGroup + ((state.dev && state.dev.rpsBonus) || 0);
 
   d.critChance = Math.min(0.95, critChance);
   d.critMult = critMult;
@@ -200,6 +223,10 @@ function recompute() {
   d.flowCostDiv = flowCostDiv;
   d.compMult = compMult;
   d.compPct = compPct;
+  // breakdown for the Stats page
+  d.tapMultTotal = tapGroup * allGroup;
+  d.idleMultTotal = idleGroup * allGroup;
+  d.allMultTotal = allGroup;
   dirty = false;
 }
 
@@ -306,6 +333,7 @@ function onCellTap(i, ev) {
   addRunes(val);
   state.lifetimeTaps++;
   spawnFloat(ev, val, crit);
+  Sound.tap(crit);
 
   // the glowing rune stays in place; it only moves once deciphered (3 taps)
   tapsOnRune++;
@@ -334,12 +362,14 @@ function buyProficiency() {
   const c = proficiencyCost();
   if (state.runes < c) return;
   state.runes -= c; state.proficiency++; dirty = true;
+  Sound.buy();
   refreshAll();
 }
 function buyFlow() {
   const c = flowCost();
   if (state.runes < c) return;
   state.runes -= c; state.flow++; dirty = true;
+  Sound.buy();
   refreshAll();
 }
 function buyResearch(r) {
@@ -348,6 +378,7 @@ function buyResearch(r) {
   const c = researchCost(r);
   if (state.runes < c) return;
   state.runes -= c; state.research[r.id] = L + 1; dirty = true;
+  Sound.research();
   refreshAll();
 }
 
@@ -505,8 +536,14 @@ function load() {
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return false;
     const s = JSON.parse(raw);
+    const defaults = { settings: { ...state.settings }, dev: { ...state.dev } };
     Object.assign(state, s);
     state.research = s.research || {};
+    // merge nested objects so older saves still get new fields
+    state.settings = { ...defaults.settings, ...(s.settings || {}) };
+    state.dev = { ...defaults.dev, ...(s.dev || {}) };
+    if (typeof state.playTimeMs !== "number") state.playTimeMs = 0;
+    if (typeof state.rebirths !== "number") state.rebirths = 0;
     return true;
   } catch (e) { return false; }
 }
@@ -537,13 +574,19 @@ let panelAccum = 0;
 function loop(now) {
   const dt = Math.min(0.25, (now - lastFrame) / 1000); // clamp big gaps
   lastFrame = now;
+  if (!document.hidden) state.playTimeMs += dt * 1000;
   if (dirty || lifetimeTapEnabled) recompute();
   if (d.idlePerSec > 0) addRunes(d.idlePerSec * dt);
   updateTop();
   checkResearchUnlock();
   // keep card states (affordability/unlocks) live during idle income
   panelAccum += dt;
-  if (panelAccum >= 0.5) { panelAccum = 0; renderUpgrades(); if (!$("#research-tab").disabled) renderResearch(); }
+  if (panelAccum >= 0.5) {
+    panelAccum = 0;
+    renderUpgrades();
+    if (!$("#research-tab").disabled) renderResearch();
+    if (!$("#modal-overlay").classList.contains("hidden") && !$("#modal-stats").classList.contains("hidden")) renderStats();
+  }
   requestAnimationFrame(loop);
 }
 
@@ -559,6 +602,350 @@ document.addEventListener("touchend", (e) => {
 }, { passive: false });
 // block ctrl/cmd + wheel zoom on desktop
 document.addEventListener("wheel", (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+
+/* =====================================================================
+   Sound — original synthesised audio via the Web Audio API.
+   Gentle pentatonic tones (never harsh), plus a slow ambient music bed.
+   Respects the "mute all" and "mute music" settings.
+   ===================================================================== */
+const Sound = (() => {
+  let ctx = null, master = null, musicGain = null, started = false;
+  let musicTimer = null;
+  const PENTA = [0, 2, 4, 7, 9];           // major pentatonic semitone steps
+  const noteHz = (semi) => 220 * Math.pow(2, semi / 12);
+
+  function ensure() {
+    if (ctx) { if (ctx.state === "suspended") ctx.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    ctx = new AC();
+    master = ctx.createGain();
+    master.gain.value = 0.9;
+    master.connect(ctx.destination);
+    musicGain = ctx.createGain();
+    musicGain.gain.value = 0.0;
+    musicGain.connect(master);
+  }
+
+  // a single soft tone with an ADSR-ish envelope
+  function tone({ freq, t = ctx.currentTime, dur = 0.18, type = "sine", gain = 0.18, dest = master }) {
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(gain, t + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(dest);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+
+  const muted = () => state.settings.muteAll;
+
+  let tapStep = 0;
+  function tap(crit) {
+    if (muted()) return; ensure(); if (!ctx) return;
+    // wandering pentatonic pluck so rapid tapping stays musical
+    const semi = PENTA[tapStep % PENTA.length] + 12 * ((tapStep / PENTA.length | 0) % 2);
+    tapStep = (tapStep + 1) % 10;
+    tone({ freq: noteHz(semi), type: "triangle", dur: 0.16, gain: 0.16 });
+    if (crit) {
+      tone({ freq: noteHz(semi + 12), type: "sine", dur: 0.3, gain: 0.14, t: ctx.currentTime + 0.04 });
+      tone({ freq: noteHz(semi + 19), type: "sine", dur: 0.35, gain: 0.1, t: ctx.currentTime + 0.09 });
+    }
+  }
+
+  function buy() {
+    if (muted()) return; ensure(); if (!ctx) return;
+    [0, 4, 7].forEach((s, i) =>
+      tone({ freq: noteHz(s), type: "sine", dur: 0.4, gain: 0.13, t: ctx.currentTime + i * 0.05 }));
+  }
+
+  function research() {
+    if (muted()) return; ensure(); if (!ctx) return;
+    // ascending shimmer
+    [0, 4, 7, 12, 16].forEach((s, i) =>
+      tone({ freq: noteHz(s + 12), type: "triangle", dur: 0.5, gain: 0.1, t: ctx.currentTime + i * 0.07 }));
+  }
+
+  // ---- ambient music: a slow, low-volume evolving arpeggio + drone ----
+  let musicIdx = 0;
+  const MUSIC_NOTES = [0, 4, 7, 11, 7, 4, 9, 7];
+  function musicStep() {
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    const semi = MUSIC_NOTES[musicIdx % MUSIC_NOTES.length] - 12;
+    musicIdx++;
+    // soft pad note
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = "sine"; o.frequency.value = noteHz(semi);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.06, t + 0.6);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.8);
+    o.connect(g); g.connect(musicGain);
+    o.start(t); o.stop(t + 2.0);
+  }
+
+  function musicActive() { return !state.settings.muteAll && !state.settings.muteMusic; }
+
+  function updateMusic() {
+    ensure(); if (!ctx) return;
+    if (musicActive()) {
+      musicGain.gain.setTargetAtTime(0.5, ctx.currentTime, 0.5);
+      if (!musicTimer) { musicStep(); musicTimer = setInterval(musicStep, 1400); }
+    } else {
+      musicGain.gain.setTargetAtTime(0.0, ctx.currentTime, 0.3);
+      if (musicTimer) { clearInterval(musicTimer); musicTimer = null; }
+    }
+  }
+
+  // kick everything off on the first user gesture (browser autoplay policy)
+  function unlock() {
+    ensure();
+    if (!started && ctx) { started = true; updateMusic(); }
+  }
+
+  return { tap, buy, research, updateMusic, unlock };
+})();
+
+// resume audio + start music on first interaction anywhere
+["pointerdown", "keydown"].forEach(evt =>
+  window.addEventListener(evt, () => Sound.unlock(), { once: false }));
+
+/* =====================================================================
+   Settings
+   ===================================================================== */
+function applySettings() {
+  const s = state.settings;
+  document.documentElement.style.setProperty("--rune-color", s.runeColor);
+  document.documentElement.style.setProperty("--tap-color", s.tapColor);
+  Sound.updateMusic();
+}
+
+function initSettingsUI() {
+  const runeC = $("#set-rune-color");
+  const tapC = $("#set-tap-color");
+  const muteAll = $("#set-mute-all");
+  const muteMusic = $("#set-mute-music");
+
+  runeC.value = state.settings.runeColor;
+  tapC.value = state.settings.tapColor;
+  muteAll.checked = state.settings.muteAll;
+  muteMusic.checked = state.settings.muteMusic;
+
+  runeC.addEventListener("input", () => {
+    state.settings.runeColor = runeC.value;
+    document.documentElement.style.setProperty("--rune-color", runeC.value);
+  });
+  tapC.addEventListener("input", () => {
+    state.settings.tapColor = tapC.value;
+    document.documentElement.style.setProperty("--tap-color", tapC.value);
+  });
+  muteAll.addEventListener("change", () => {
+    state.settings.muteAll = muteAll.checked;
+    Sound.updateMusic();
+  });
+  muteMusic.addEventListener("change", () => {
+    state.settings.muteMusic = muteMusic.checked;
+    Sound.updateMusic();
+  });
+  $("#reset-colors-btn").addEventListener("click", () => {
+    state.settings.runeColor = "#2ee6d6";
+    state.settings.tapColor = "#2ee6d6";
+    runeC.value = "#2ee6d6"; tapC.value = "#2ee6d6";
+    applySettings();
+  });
+}
+
+/* =====================================================================
+   Modals
+   ===================================================================== */
+function openModal(name) {
+  $("#modal-overlay").classList.remove("hidden");
+  document.querySelectorAll(".modal").forEach(m => m.classList.add("hidden"));
+  const m = $("#modal-" + name);
+  if (m) m.classList.remove("hidden");
+  if (name === "stats") renderStats();
+}
+function closeModal() { $("#modal-overlay").classList.add("hidden"); }
+
+function initModals() {
+  document.querySelectorAll(".footer-btn[data-modal]").forEach(btn =>
+    btn.addEventListener("click", () => openModal(btn.dataset.modal)));
+  document.querySelectorAll("[data-close]").forEach(btn =>
+    btn.addEventListener("click", closeModal));
+  // click outside the modal closes it
+  $("#modal-overlay").addEventListener("pointerdown", (e) => {
+    if (e.target.id === "modal-overlay") closeModal();
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+}
+
+/* =====================================================================
+   Stats
+   ===================================================================== */
+function fmtDuration(ms) {
+  let s = Math.floor(ms / 1000);
+  const d = Math.floor(s / 86400); s -= d * 86400;
+  const h = Math.floor(s / 3600); s -= h * 3600;
+  const m = Math.floor(s / 60); s -= m * 60;
+  const parts = [];
+  if (d) parts.push(d + "d");
+  if (h || d) parts.push(h + "h");
+  parts.push(m + "m");
+  parts.push(s + "s");
+  return parts.join(" ");
+}
+
+function renderStats() {
+  if (dirty) recompute();
+  const rows = [];
+  const row = (k, v) => rows.push(`<div class="stat-line"><span class="k">${k}</span><span class="v">${v}</span></div>`);
+
+  row("Time played", fmtDuration(state.playTimeMs));
+  row("Runes tapped", fmt(state.lifetimeTaps));
+  row("Runes gathered (all time)", fmt(state.lifetimeRunes));
+  row("Comprehension", fmt(state.comprehension));
+  if (state.rebirthUnlocked || state.rebirths > 0) row("Rebirths", fmt(state.rebirths));
+
+  // multiplier (only meaningful once a multiplier has been researched / earned)
+  if (d.allMultTotal > 1.0001 || d.tapMultTotal > 1.0001) {
+    row("Tap multiplier", "x" + fmt(d.tapMultTotal));
+    row("Idle multiplier", "x" + fmt(d.idleMultTotal));
+    row("Global multiplier", "x" + fmt(d.allMultTotal));
+  }
+  if (d.critMult > 0) {
+    row("Crit chance", Math.round(d.critChance * 100) + "%");
+    row("Crit multiplier", "x" + fmt(d.critMult));
+  }
+  row("Runes / tap", fmt(d.tapValue));
+  row("Runes / second", fmt(d.idlePerSec));
+
+  $("#stats-body").innerHTML = rows.join("");
+}
+
+/* =====================================================================
+   Patch Notes  — keep newest at the top; add an entry with every patch.
+   ===================================================================== */
+const PATCH_NOTES = [
+  {
+    v: "1.2.0", when: "2026-06-10", notes: [
+      "Added Settings: customise the rune colour and the tap-number colour.",
+      "Added mute toggles for all sound and for music.",
+      "Added original synthesised sound effects for tapping, buying upgrades and researching, plus a gentle ambient music bed.",
+      "Added a Stats page (time played, runes tapped, all-time runes, multipliers, crit, and more).",
+      "Added a keypad-locked Dev Control Panel.",
+      "Added this Patch Notes page.",
+      "Moved the game title up into the header.",
+    ],
+  },
+  {
+    v: "1.1.0", when: "2026-06-10", notes: [
+      "The glowing rune now stays put for three taps before moving on, so it no longer feels like it vanishes.",
+      "Locked the app to the viewport — the page no longer scrolls.",
+    ],
+  },
+  {
+    v: "1.0.0", when: "2026-06-09", notes: [
+      "Initial release: tap runes, buy Proficiency & Flow, earn Comprehension, and unlock the 40-entry Research tree.",
+    ],
+  },
+];
+
+function renderPatchNotes() {
+  $("#patch-body").innerHTML = PATCH_NOTES.map(p =>
+    `<div class="patch-entry"><h3>v${p.v}<span class="when">${p.when}</span></h3>` +
+    `<ul>${p.notes.map(n => `<li>${n}</li>`).join("")}</ul></div>`
+  ).join("");
+}
+
+/* =====================================================================
+   Dev Control Panel (keypad locked to 1337)
+   ===================================================================== */
+const DEV_CODE = "1337";
+function initDevPanel() {
+  // build keypad
+  const keypad = $("#keypad");
+  const layout = ["1","2","3","4","5","6","7","8","9","Clear","0","Enter"];
+  let entry = "";
+  const display = $("#keypad-display");
+  const msg = $("#keypad-msg");
+  const render = () => { display.textContent = "•".repeat(entry.length); };
+
+  function unlock() {
+    $("#dev-lock").classList.add("hidden");
+    $("#dev-controls").classList.remove("hidden");
+  }
+
+  layout.forEach(key => {
+    const b = document.createElement("button");
+    b.textContent = key;
+    b.addEventListener("click", () => {
+      msg.textContent = ""; msg.className = "keypad-msg";
+      if (key === "Clear") { entry = ""; }
+      else if (key === "Enter") {
+        if (entry === DEV_CODE) { msg.textContent = "Access granted"; msg.className = "keypad-msg good"; unlock(); }
+        else { msg.textContent = "Incorrect code"; msg.className = "keypad-msg bad"; entry = ""; }
+      } else if (entry.length < 6) { entry += key; }
+      render();
+    });
+    keypad.appendChild(b);
+  });
+
+  // tap multiplier
+  const tapWrap = $("#dev-tapmult");
+  const tapCur = $("#dev-tapmult-cur");
+  const showTapCur = () => { tapCur.textContent = "Current: x" + (state.dev.tapMult || 1); };
+  [1, 2, 4, 8, 16, 32, 64].forEach(mult => {
+    const b = document.createElement("button");
+    b.textContent = mult === 1 ? "x1 (off)" : "x" + mult;
+    b.addEventListener("click", () => {
+      state.dev.tapMult = mult; dirty = true; refreshAll(); showTapCur();
+      tapWrap.querySelectorAll("button").forEach(x => x.classList.remove("on"));
+      b.classList.add("on");
+    });
+    tapWrap.appendChild(b);
+  });
+  showTapCur();
+
+  // bonus runes / second (presets add; custom sets exact)
+  const rpsWrap = $("#dev-rps");
+  const rpsCur = $("#dev-rps-cur");
+  const showRpsCur = () => { rpsCur.textContent = "Current dev bonus: " + fmt(state.dev.rpsBonus || 0) + " /sec"; };
+  [1, 5, 10, 100, 500].forEach(v => {
+    const b = document.createElement("button");
+    b.textContent = "+" + v;
+    b.addEventListener("click", () => { state.dev.rpsBonus = (state.dev.rpsBonus || 0) + v; dirty = true; refreshAll(); showRpsCur(); });
+    rpsWrap.appendChild(b);
+  });
+  $("#dev-rps-set").addEventListener("click", () => {
+    const v = parseFloat($("#dev-rps-custom").value);
+    if (isFinite(v)) { state.dev.rpsBonus = v; dirty = true; refreshAll(); showRpsCur(); }
+  });
+  showRpsCur();
+
+  // add runes
+  const runesWrap = $("#dev-runes");
+  [1, 100, 1000].forEach(v => {
+    const b = document.createElement("button");
+    b.textContent = "+" + fmt(v);
+    b.addEventListener("click", () => { addRunes(v); refreshAll(); });
+    runesWrap.appendChild(b);
+  });
+  $("#dev-runes-add").addEventListener("click", () => {
+    const v = parseFloat($("#dev-runes-custom").value);
+    if (isFinite(v) && v > 0) { addRunes(v); refreshAll(); }
+  });
+
+  // add comprehension
+  const compWrap = $("#dev-comp");
+  [1, 5, 10, 100, 1000].forEach(v => {
+    const b = document.createElement("button");
+    b.textContent = "+" + fmt(v);
+    b.addEventListener("click", () => { state.comprehension += v; dirty = true; refreshAll(); });
+    compWrap.appendChild(b);
+  });
+}
 
 /* ---------- boot ---------- */
 function init() {
@@ -578,6 +965,12 @@ function init() {
   // re-fit after fonts/layout settle
   setTimeout(sizeGrid, 50);
   setTimeout(sizeGrid, 300);
+
+  applySettings();
+  initSettingsUI();
+  initModals();
+  initDevPanel();
+  renderPatchNotes();
 
   setInterval(save, 10000);
   document.addEventListener("visibilitychange", () => { if (document.hidden) save(); });
