@@ -899,6 +899,11 @@ function renderStats() {
    ===================================================================== */
 const PATCH_NOTES = [
   {
+    v: "1.5.1", when: "2026-06-10", notes: [
+      "Fixed the “/ tap” display showing a stale 0.33 — a beginning tap is worth 1 rune.",
+    ],
+  },
+  {
     v: "1.5.0", when: "2026-06-10", notes: [
       "Tapping an upgrade or research repeatedly now keeps buying it instead of mis-tapping — the cards are updated in place rather than rebuilt, and rapid taps on buttons are no longer swallowed by the zoom guard.",
     ],
