@@ -293,6 +293,7 @@ let state = {
     tapColor: "#2ee6d6",
     muteAll: false,
     muteMusic: false,
+    muteSfx: false,
     hidePurchased: false,
   },
 
@@ -953,7 +954,8 @@ const Sound = (() => {
     o.start(t); o.stop(t + dur + 0.05);
   }
 
-  const muted = () => state.settings.muteAll;
+  // sound effects (tap / buy / research) are silenced by "mute all" or "mute SFX"
+  const muted = () => state.settings.muteAll || state.settings.muteSfx;
 
   function tap(crit) {
     if (muted()) return; ensure(); if (!ctx) return;
@@ -1032,11 +1034,13 @@ function initSettingsUI() {
   const runeC = $("#set-rune-color");
   const tapC = $("#set-tap-color");
   const muteAll = $("#set-mute-all");
+  const muteSfx = $("#set-mute-sfx");
   const muteMusic = $("#set-mute-music");
 
   runeC.value = state.settings.runeColor;
   tapC.value = state.settings.tapColor;
   muteAll.checked = state.settings.muteAll;
+  muteSfx.checked = state.settings.muteSfx;
   muteMusic.checked = state.settings.muteMusic;
 
   runeC.addEventListener("input", () => {
@@ -1050,6 +1054,9 @@ function initSettingsUI() {
   muteAll.addEventListener("change", () => {
     state.settings.muteAll = muteAll.checked;
     Sound.updateMusic();
+  });
+  muteSfx.addEventListener("change", () => {
+    state.settings.muteSfx = muteSfx.checked;
   });
   muteMusic.addEventListener("change", () => {
     state.settings.muteMusic = muteMusic.checked;
@@ -1155,6 +1162,11 @@ function renderStats() {
    Patch Notes  — keep newest at the top; add an entry with every patch.
    ===================================================================== */
 const PATCH_NOTES = [
+  {
+    v: "2.2.1", when: "2026-06-12", notes: [
+      "Settings: added a separate “Mute sound effects” toggle (silences tapping/buying without muting the music).",
+    ],
+  },
   {
     v: "2.2.0", when: "2026-06-12", notes: [
       "Herbalism & Mining are now proper idle games: each has Yield, Auto-gather, Speed and Potency upgrades bought with the resource itself, and the global bonus now scales with everything you've ever gathered (so spending it never lowers the bonus). Resources keep gathering in the background.",
