@@ -217,8 +217,8 @@ function magicReq(level) { return 25 * Math.pow(2, level); } // 25, 50, 100, 200
 
 /* Forge upgrades (bought with Gold). minRank gates the new tiers. */
 const COMBAT_UP = [
-  { id:"sharpen",  name:"Sharpen Blade",   base:10,  growth:1.16, desc:"+0.5 tap damage." },
-  { id:"familiar", name:"Summon Familiar", base:60,  growth:1.18, desc:"+0.25 damage per second (auto-attack)." },
+  { id:"sharpen",  name:"Sharpen Blade",   base:10,  growth:1.16, desc:"+2 tap damage." },
+  { id:"familiar", name:"Summon Familiar", base:60,  growth:1.18, desc:"+3.33 damage per second (auto-attack)." },
   { id:"whetstone",name:"Whetstone",       base:250, growth:1.26, special:"crit", desc:"+1% crit chance and +0.5 crit damage." },
   { id:"greed",    name:"Greed",           base:120, growth:1.22, special:"gold", desc:"+10% gold from kills." },
   // ★ tier (rank >= 1): the monster fights back
@@ -257,6 +257,9 @@ const COMBAT_TALENTS = [
 ];
 function combatUpCost(u) { return Math.ceil(u.base * Math.pow(u.growth, (state.combatUp[u.id] | 0))); }
 function combatTalentCost(t) { return Math.ceil(t.cost * Math.pow(t.growth || 1, (state.combatTalents[t.id] | 0))); }
+// Tactics are repeatable (infinite levels); each repurchase costs much more
+const COMBAT_RESEARCH_GROWTH = 8;
+function combatResearchCost(r) { return Math.ceil(r.cost * Math.pow(COMBAT_RESEARCH_GROWTH, (state.combatResearch[r.id] | 0))); }
 
 /* ---------- professions: Herbalism & Mining (each a small idle game) ----------
    Resource (herbs / ore) is spent on the profession's own upgrades. The global
@@ -374,8 +377,8 @@ let cd = { tapDmg: 1, dps: 0, critChance: 0, critMult: 0, goldMult: 1,
 let combatDirty = true;
 function recomputeCombat() {
   const lv = (id) => (state.combatUp[id] | 0);
-  let tapAdd = CBT.baseTap + 0.5 * lv("sharpen");
-  let autoAdd = 0.25 * lv("familiar");
+  let tapAdd = CBT.baseTap + 2 * lv("sharpen");
+  let autoAdd = 3.33 * lv("familiar");
   let critChance = Math.min(0.75, 0.01 * lv("whetstone"));
   let critMult = lv("whetstone") > 0 ? 2 + 0.5 * lv("whetstone") : 0;
   let goldPct = 10 * lv("greed");
@@ -1291,6 +1294,14 @@ function renderStats() {
    ===================================================================== */
 const PATCH_NOTES = [
   {
+    v: "2.7.0", when: "2026-06-12", notes: [
+      "Combat Tactics are now repeatable with infinite levels — each repurchase stacks its multiplier again (cost x8 per level).",
+      "Ascending to a new star/triangle now wipes your Forge and Tactics (rank, Survival Runes, talents and magic are kept), so each rank is a fresh climb.",
+      "Summon Familiar now gives +3.33 auto-damage/level; Sharpen Blade reverted to +2 tap damage.",
+      "Dev panel: added an Add Gold (+10/+100/+1000/custom) control.",
+    ],
+  },
+  {
     v: "2.6.1", when: "2026-06-12", notes: [
       "Herbalism & Mining now show how much you earn per tap (alongside per second).",
       "Combat now tracks and shows your highest depth ever reached (persists through Retreat) using a ★/▲ Lv label.",
@@ -1511,18 +1522,18 @@ function initDevPanel() {
     if (isFinite(v) && v > 0) { state.comprehension += v; dirty = true; refreshAll(); }
   });
 
-  // generic "+1/+5/+10 and custom" adder for a resource
-  const devAdder = (btnsSel, customSel, addBtnSel, apply) => {
+  // generic preset + custom adder for a resource
+  const devAdder = (btnsSel, customSel, addBtnSel, apply, presets) => {
     const wrap = $(btnsSel);
-    [1, 5, 10].forEach(v => {
+    (presets || [1, 5, 10]).forEach(v => {
       const b = document.createElement("button");
-      b.textContent = "+" + v;
-      b.addEventListener("click", () => { apply(v); dirty = true; refreshAll(); });
+      b.textContent = "+" + fmt(v);
+      b.addEventListener("click", () => { apply(v); dirty = true; combatDirty = true; refreshAll(); });
       wrap.appendChild(b);
     });
     $(addBtnSel).addEventListener("click", () => {
       const v = parseFloat($(customSel).value);
-      if (isFinite(v) && v > 0) { apply(v); dirty = true; refreshAll(); }
+      if (isFinite(v) && v > 0) { apply(v); dirty = true; combatDirty = true; refreshAll(); }
     });
   };
   // Void Runes
@@ -1532,6 +1543,8 @@ function initDevPanel() {
   // Herbalism (herbs) and Mining (ore) — grant to both spendable & lifetime total
   devAdder("#dev-herb", "#dev-herb-custom", "#dev-herb-add", (v) => grantResource("herb", v));
   devAdder("#dev-ore", "#dev-ore-custom", "#dev-ore-add", (v) => grantResource("ore", v));
+  // Gold (combat)
+  devAdder("#dev-gold", "#dev-gold-custom", "#dev-gold-add", (v) => { state.gold += v; }, [10, 100, 1000]);
 }
 
 /* =====================================================================
@@ -1784,6 +1797,10 @@ function rankUp() {
   state.monsterLevel = 1;
   state.playerHp = null;       // refilled by ensurePlayer at the new max
   bossDeadline = 0;
+  // ascending wipes Forge & Tactics — you rebuild them each rank (Survival
+  // Runes, talents, rank and magic persist)
+  state.combatUp = {};
+  state.combatResearch = {};
   combatDirty = true;          // HP/regen scale with rank
 }
 function killMonster() {
@@ -1914,10 +1931,11 @@ function buyCombatUp(u) {
 }
 function buyCombatResearch(r) {
   if ((r.minRank || 0) > state.combatRank) return;
-  if ((state.combatResearch[r.id] | 0) > 0) return;
-  if (state.highestLevel < r.unlock || state.gold < r.cost) return;
-  state.gold -= r.cost;
-  state.combatResearch[r.id] = 1;
+  if (state.highestLevel < r.unlock) return;
+  const cost = combatResearchCost(r);
+  if (state.gold < cost) return;
+  state.gold -= cost;
+  state.combatResearch[r.id] = (state.combatResearch[r.id] | 0) + 1;   // infinite levels
   combatDirty = true;
   Sound.research();
   renderCombatTactics();
@@ -2052,14 +2070,15 @@ function renderCombatTactics() {
   const items = [];
   for (const r of COMBAT_RESEARCH) {
     if ((r.minRank || 0) > state.combatRank) continue;   // hidden until the tier is reached
-    const owned = (state.combatResearch[r.id] | 0) > 0;
+    const L = state.combatResearch[r.id] | 0;
     const unlocked = state.highestLevel >= r.unlock;
-    if (!unlocked && !owned && state.highestLevel < r.unlock - 5) continue; // hide far-off ones
+    if (!unlocked && L === 0 && state.highestLevel < r.unlock - 5) continue; // hide far-off ones
+    const cost = combatResearchCost(r);
     items.push({ key: "ct-" + r.id, data: {
-      name: r.name, levelText: owned ? "Researched" : "", desc: r.desc,
-      cost: r.cost, costText: `⟡ ${fmt(r.cost)} gold`,
+      name: r.name, levelText: `Lv ${L}`, desc: r.desc,   // repeatable (infinite levels)
+      cost, costText: `⟡ ${fmt(cost)} gold`,
       locked: !unlocked, lockText: !unlocked ? `🔒 Reach depth ${r.unlock}` : null,
-      maxed: owned, onBuy: () => buyCombatResearch(r),
+      onBuy: () => buyCombatResearch(r),
     } });
   }
   syncListGold($("#tactics-list"), items);
