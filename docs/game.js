@@ -181,16 +181,26 @@ const TAPS_PER_RESOURCE = 10;   // herbalism / mining
    "ascension": clear 10 bosses (lvl 10,20,..,100) to gain a star, reset to
    level 1. 5 stars -> a green triangle tier (rank 6+). */
 const RANK_MULT = 4;            // each rank's ceiling is this much higher ("harder")
+const BOSS_TIME_MS = 10000;    // bosses must be defeated within 10 seconds
 const CBT = {
   depth:     () => state.combatRank * 100 + state.monsterLevel,   // monotonic progress metric
   isBoss:    (lvl) => lvl % 10 === 0,                             // lvl = within-rank level (1-100)
   // each rank restarts the climb (level 1) but with a higher ceiling via RANK_MULT^rank
   monsterHp: (lvl, rank) => Math.ceil((lvl % 10 === 0 ? 45 : 12) * Math.pow(1.13, lvl - 1) * Math.pow(RANK_MULT, rank)),
-  goldDrop:  (lvl, rank) => Math.ceil(5 * Math.pow(1.13, lvl - 1) * Math.pow(RANK_MULT, rank)) * (lvl % 10 === 0 ? 8 : 1),
+  // ~30 gold over the first 10 levels (boss ~10); grows with HP so pacing holds
+  goldDrop:  (lvl, rank) => Math.ceil(Math.pow(1.13, lvl - 1) * Math.pow(RANK_MULT, rank) * (lvl % 10 === 0 ? 3.5 : 1)),
   monsterAtk:(lvl, rank) => Math.ceil(2 * Math.pow(1.08, lvl - 1) * Math.pow(2, rank)),   // damage / sec to player
-  retreatGain: () => Math.floor(Math.pow(Math.max(0, state.highestLevel - 1), 0.85)),
   baseTap: 1,
 };
+
+/* Castable temporary buff spells (▲ tier), unlocked as magic levels up */
+const SPELLS = [
+  { id:"shield", name:"Arcane Shield", emoji:"🛡", unlock:1, cooldown:30, duration:8,  desc:"Block all monster damage for 8s." },
+  { id:"vital",  name:"Vital Surge",   emoji:"💚", unlock:2, cooldown:30, duration:10, desc:"Heal fully and triple HP regen for 10s." },
+  { id:"haste",  name:"Haste",         emoji:"💨", unlock:3, cooldown:25, duration:8,  desc:"+30% dodge for 8s." },
+  { id:"rage",   name:"Rage",          emoji:"😡", unlock:4, cooldown:25, duration:8,  desc:"Double all your damage for 8s." },
+];
+function buffActive(id) { return ((state.buffs && state.buffs[id]) || 0) > Date.now(); }
 function rankSymbol(rank) {
   if (rank <= 0) return "";
   if (rank <= 5) return "★".repeat(rank);
@@ -200,8 +210,8 @@ function magicReq(level) { return 25 * Math.pow(2, level); } // 25, 50, 100, 200
 
 /* Forge upgrades (bought with Gold). minRank gates the new tiers. */
 const COMBAT_UP = [
-  { id:"sharpen",  name:"Sharpen Blade",   base:10,  growth:1.16, desc:"+2 tap damage." },
-  { id:"familiar", name:"Summon Familiar", base:60,  growth:1.18, desc:"+1 damage per second (auto-attack)." },
+  { id:"sharpen",  name:"Sharpen Blade",   base:10,  growth:1.16, desc:"+0.5 tap damage." },
+  { id:"familiar", name:"Summon Familiar", base:60,  growth:1.18, desc:"+0.25 damage per second (auto-attack)." },
   { id:"whetstone",name:"Whetstone",       base:250, growth:1.26, special:"crit", desc:"+1% crit chance and +0.5 crit damage." },
   { id:"greed",    name:"Greed",           base:120, growth:1.22, special:"gold", desc:"+10% gold from kills." },
   // ★ tier (rank >= 1): the monster fights back
@@ -236,7 +246,7 @@ const COMBAT_TALENTS = [
   { id:"avarice",   name:"Avarice",    cost:2, growth:1.6, max:50, fx:{goldPct:30}, desc:"+30% gold." },
   { id:"bloodlust", name:"Bloodlust",  cost:3, growth:1.7, max:25, special:"crit", desc:"+5% crit chance, +2 crit damage." },
   { id:"war_chest", name:"War Chest",  cost:2, growth:1.8, max:15, special:"startgold", desc:"Start each Retreat with more gold (x10 per level)." },
-  { id:"survivor",  name:"Survivor",   cost:5, growth:2.0, max:30, special:"srgain", desc:"+1 Survival Rune per Retreat." },
+  { id:"survivor",  name:"Survivor",   cost:5, growth:2.0, max:30, special:"srgain", desc:"Each boss drops +1 Survival Rune." },
 ];
 function combatUpCost(u) { return Math.ceil(u.base * Math.pow(u.growth, (state.combatUp[u.id] | 0))); }
 function combatTalentCost(t) { return Math.ceil(t.cost * Math.pow(t.growth || 1, (state.combatTalents[t.id] | 0))); }
@@ -312,6 +322,8 @@ let state = {
   playerHp: null,        // player HP (★ tier and beyond)
   magicLevel: 0,         // fireball / spell level (▲ tier)
   magicProgress: 0,
+  buffs: {},             // spell id -> expiry timestamp (ms)
+  cooldowns: {},         // spell id -> ready timestamp (ms)
   combatUp: {},          // forge upgrade id -> level
   combatResearch: {},    // tactics research id -> level
   combatTalents: {},     // retreat talent id -> level
@@ -354,8 +366,8 @@ let cd = { tapDmg: 1, dps: 0, critChance: 0, critMult: 0, goldMult: 1,
 let combatDirty = true;
 function recomputeCombat() {
   const lv = (id) => (state.combatUp[id] | 0);
-  let tapAdd = CBT.baseTap + 2 * lv("sharpen");
-  let autoAdd = 1 * lv("familiar");
+  let tapAdd = CBT.baseTap + 0.5 * lv("sharpen");
+  let autoAdd = 0.25 * lv("familiar");
   let critChance = Math.min(0.75, 0.01 * lv("whetstone"));
   let critMult = lv("whetstone") > 0 ? 2 + 0.5 * lv("whetstone") : 0;
   let goldPct = 10 * lv("greed");
@@ -385,29 +397,17 @@ function recomputeCombat() {
   // ★ stats: agility (dodge), strength (damage), vitality (HP/regen); ▲ intellect (magic)
   const agi = lv("agility"), str = lv("strength"), vit = lv("vitality"), intel = lv("intellect");
 
-  // ▲ magic-level passive rewards (cycle of 5 spell types)
-  let magicDmgBonus = 0, hpPctBonus = 0, dodgeBonus = 0, strPctBonus = 0, regenPctBonus = 0;
-  for (let L = 1; L <= (state.magicLevel | 0); L++) {
-    switch (L % 5) {
-      case 1: magicDmgBonus += 2; break;
-      case 2: hpPctBonus += 10; break;
-      case 3: dodgeBonus += 0.005; break;
-      case 4: strPctBonus += 5; break;
-      case 0: regenPctBonus += 20; break;
-    }
-  }
-
-  const strengthMult = (1 + 0.003 * str) * (1 + strPctBonus / 100);
+  const strengthMult = (1 + 0.003 * str);
   cd.tapDmg = tapAdd * dmgMult * allMult * (1 + dmgPct / 100) * strengthMult;
   cd.dps = autoAdd * dpsMult * allMult * (1 + dpsPct / 100) * strengthMult;
   cd.critChance = Math.min(0.9, critChance);
   cd.critMult = critMult;
   cd.goldMult = (1 + goldPct / 100) * goldMult * (1 + talGoldPct / 100);
 
-  cd.dodge = Math.min(0.9, (0.001 * agi + dodgeBonus) * dodgeMult);
-  cd.playerMaxHp = (60 + 40 * vit) * (1 + 0.5 * state.combatRank) * (1 + hpPctBonus / 100);
-  cd.regen = Math.max(1, (60 + 40 * vit) * 0.03 + 2 * vit) * (1 + regenPctBonus / 100);
-  cd.magicDamage = (2 + intel + magicDmgBonus) * magicMult;
+  cd.dodge = Math.min(0.9, (0.001 * agi) * dodgeMult);
+  cd.playerMaxHp = (60 + 40 * vit) * (1 + 0.5 * state.combatRank);
+  cd.regen = Math.max(1, (60 + 40 * vit) * 0.03 + 2 * vit);
+  cd.magicDamage = (2 + intel + (state.magicLevel | 0)) * magicMult;   // +1 per magic level
   cd.atkReduce = atkReduce;
   combatDirty = false;
 }
@@ -822,6 +822,29 @@ function renderResearch() {
     } });
   }
   syncList($("#research-list"), items);
+  const ra = $("#research-all");
+  if (ra) ra.disabled = state.totalRunes < RESEARCH_ALL_UNLOCK;
+}
+
+const RESEARCH_ALL_UNLOCK = 999e12;   // 999 trillion total runes
+/* buy every research the player can currently afford (cheapest first) */
+function researchAll() {
+  if (state.totalRunes < RESEARCH_ALL_UNLOCK) return;
+  let bought = 0, guard = 0;
+  while (guard++ < 100000) {
+    let best = null, bestCost = Infinity;
+    for (const r of RESEARCH) {
+      if ((state.research[r.id] | 0) >= researchMax(r)) continue;
+      if (state.lifetimeRunes < r.unlock) continue;
+      const c = researchCost(r);
+      if (c <= state.runes && c < bestCost) { best = r; bestCost = c; }
+    }
+    if (!best) break;
+    state.runes -= bestCost;
+    state.research[best.id] = (state.research[best.id] | 0) + 1;
+    bought++;
+  }
+  if (bought > 0) { dirty = true; Sound.research(); refreshAll(); }
 }
 
 /* unlock the research tab once first comprehension is earned */
@@ -886,6 +909,8 @@ function load() {
     state.combatTalents = s.combatTalents || {};
     state.herbUp = s.herbUp || {};
     state.oreUp = s.oreUp || {};
+    state.buffs = s.buffs || {};
+    state.cooldowns = s.cooldowns || {};
     // merge nested objects so older saves still get new fields
     state.settings = { ...defaults.settings, ...(s.settings || {}) };
     state.dev = { ...defaults.dev, ...(s.dev || {}) };
@@ -1159,6 +1184,7 @@ function initSettingsUI() {
     state.settings.hidePurchased = hidePurchased.checked;
     renderResearch();
   });
+  $("#research-all").addEventListener("click", researchAll);
 }
 
 /* =====================================================================
@@ -1247,6 +1273,15 @@ function renderStats() {
    Patch Notes  — keep newest at the top; add an entry with every patch.
    ===================================================================== */
 const PATCH_NOTES = [
+  {
+    v: "2.6.0", when: "2026-06-12", notes: [
+      "Bosses now have a 10-second kill timer — fail and the boss heals to full and the timer resets (a DPS check).",
+      "Combat rebalance: Sharpen Blade +0.5 (was +2), Summon Familiar +0.25 (was +1), and gold drops are much lower (~30g over the first 10 levels, boss ~10g).",
+      "Survival Runes are now earned only from defeating bosses (Retreat just restarts the climb).",
+      "Magic spells are now castable temporary buffs: Arcane Shield, Vital Surge, Haste and Rage, unlocked as your magic levels up.",
+      "Research: added a “Research All” button (unlocks at 999 trillion total runes) that buys everything you can afford.",
+    ],
+  },
   {
     v: "2.5.0", when: "2026-06-12", notes: [
       "Combat tiers: clear 10 bosses (100 levels) to earn a ★ and restart at level 1 — and now the monster fights back! You gain HP, plus Agility (dodge) and Strength (damage) stats with new Forge & Tactics.",
@@ -1722,16 +1757,21 @@ function rankUp() {
   state.combatRank++;
   state.monsterLevel = 1;
   state.playerHp = null;       // refilled by ensurePlayer at the new max
+  bossDeadline = 0;
   combatDirty = true;          // HP/regen scale with rank
 }
 function killMonster() {
   state.gold += CBT.goldDrop(state.monsterLevel, state.combatRank) * cd.goldMult;
-  if (state.monsterLevel % 10 === 0) state.survivalRunes += 1;   // 1 Survival Rune per boss
+  if (state.monsterLevel % 10 === 0) {
+    state.survivalRunes += 1 + (state.combatTalents.survivor | 0);  // Survival Runes only from bosses
+    bossDeadline = 0;
+  }
   state.monsterLevel++;
   if (state.monsterLevel > 100) rankUp();                        // cleared a century -> +1 star
   const nd = CBT.depth();
   if (nd > state.highestLevel) state.highestLevel = nd;
   state.monsterHp = CBT.monsterHp(state.monsterLevel, state.combatRank);
+  if (state.monsterLevel % 10 === 0) bossDeadline = 0;           // a fresh boss -> new timer
   // small heal between fights at the ★/▲ tiers
   if (state.combatRank >= 1 && state.playerHp != null) {
     state.playerHp = Math.min(cd.playerMaxHp, state.playerHp + cd.playerMaxHp * 0.1);
@@ -1742,11 +1782,25 @@ function playerDefeated() {
   state.monsterLevel = Math.floor((state.monsterLevel - 1) / 10) * 10 + 1;
   state.monsterHp = CBT.monsterHp(state.monsterLevel, state.combatRank);
   state.playerHp = cd.playerMaxHp;
+  bossDeadline = 0;
 }
+/* boss 10-second kill timer. Returns remaining ms (or 0 when not a boss). */
+let bossDeadline = 0;
+function bossTimerCheck(now) {
+  if (!CBT.isBoss(state.monsterLevel)) { bossDeadline = 0; return 0; }
+  if (!bossDeadline) bossDeadline = now + BOSS_TIME_MS;
+  if (now > bossDeadline) {                       // ran out of time -> boss fully heals, retry
+    state.monsterHp = CBT.monsterHp(state.monsterLevel, state.combatRank);
+    bossDeadline = now + BOSS_TIME_MS;
+  }
+  return Math.max(0, bossDeadline - now);
+}
+function rageMult() { return buffActive("rage") ? 2 : 1; }
 function tapMonster(ev) {
   if (combatDirty) recomputeCombat();
   ensureMonster();
-  let dmg = cd.tapDmg, crit = false;
+  bossTimerCheck(Date.now());
+  let dmg = cd.tapDmg * rageMult(), crit = false;
   if (cd.critMult > 0 && Math.random() < cd.critChance) { dmg *= cd.critMult; crit = true; }
   state.monsterHp -= dmg;
   spawnCombatFloat(ev, dmg, crit);
@@ -1758,27 +1812,39 @@ function tapFireball(ev) {
   if (state.combatRank < 6) return;
   if (combatDirty) recomputeCombat();
   ensureMonster();
-  const dmg = cd.magicDamage;
+  bossTimerCheck(Date.now());
+  const dmg = cd.magicDamage * rageMult();
   state.monsterHp -= dmg;
   spawnCombatFloat(ev, dmg, false, true);
   state.magicProgress = (state.magicProgress | 0) + 1;
   if (state.magicProgress >= magicReq(state.magicLevel)) {
     state.magicProgress = 0;
     state.magicLevel = (state.magicLevel | 0) + 1;
-    combatDirty = true;        // new spell learned
+    combatDirty = true;        // a new spell may unlock
     Sound.research();
   }
   if (state.monsterHp <= 0) { killMonster(); Sound.buy(); }
   else Sound.tap(false);
   if (combatSub === "battle") renderCombatBattle();
 }
+function castSpell(s) {
+  if (state.magicLevel < s.unlock) return;
+  const now = Date.now();
+  if ((state.cooldowns[s.id] || 0) > now) return;     // still on cooldown
+  state.buffs[s.id] = now + s.duration * 1000;
+  state.cooldowns[s.id] = now + s.cooldown * 1000;
+  if (s.id === "vital") { ensurePlayer(); state.playerHp = cd.playerMaxHp; }
+  Sound.research();
+  renderCombatBattle();
+}
 /* idle auto-attack & the monster fighting back, from real elapsed time */
 function accrueCombat(sec) {
   if (!hasProfession("combat")) return;
   if (combatDirty) recomputeCombat();
   ensureMonster();
+  bossTimerCheck(Date.now());
   if (cd.dps > 0) {
-    let dmg = cd.dps * sec, guard = 0;
+    let dmg = cd.dps * rageMult() * sec, guard = 0;
     while (dmg > 0 && guard < 100000) {
       if (dmg >= state.monsterHp) { dmg -= state.monsterHp; state.monsterHp = 0; killMonster(); guard++; }
       else { state.monsterHp -= dmg; dmg = 0; }
@@ -1787,8 +1853,11 @@ function accrueCombat(sec) {
   // the monster fights back at the ★/▲ tiers (live ticks only — be generous offline)
   if (state.combatRank >= 1 && sec < 60) {
     ensurePlayer();
-    const incoming = CBT.monsterAtk(state.monsterLevel, state.combatRank) * (1 - cd.atkReduce) * (1 - cd.dodge);
-    state.playerHp = Math.min(cd.playerMaxHp, state.playerHp + (cd.regen - incoming) * sec);
+    const dodge = Math.min(0.95, cd.dodge + (buffActive("haste") ? 0.30 : 0));
+    const incoming = buffActive("shield") ? 0
+      : CBT.monsterAtk(state.monsterLevel, state.combatRank) * (1 - cd.atkReduce) * (1 - dodge);
+    const regen = cd.regen * (buffActive("vital") ? 3 : 1);
+    state.playerHp = Math.min(cd.playerMaxHp, state.playerHp + (regen - incoming) * sec);
     if (state.playerHp <= 0) playerDefeated();
   }
 }
@@ -1836,14 +1905,8 @@ function buyCombatTalent(t) {
   Sound.buy();
   renderCombatRetreat();
 }
-function retreatGain() {
-  return CBT.retreatGain() + (state.combatTalents.survivor | 0);
-}
 function doRetreat() {
-  const gain = retreatGain();
-  if (gain <= 0) return;
-  state.survivalRunes += gain;
-  // reset the entire combat climb (keep SR + combat talents)
+  // restart the climb (Survival Runes are earned from bosses, not from retreating)
   state.gold = (state.combatTalents.war_chest | 0) > 0 ? Math.pow(10, state.combatTalents.war_chest | 0) : 0;
   state.monsterLevel = 1;
   state.combatRank = 0;
@@ -1854,6 +1917,7 @@ function doRetreat() {
   state.magicProgress = 0;
   state.combatUp = {};
   state.combatResearch = {};
+  bossDeadline = 0;
   combatDirty = true;
   Sound.research();
   renderCombatRetreat();
@@ -1885,6 +1949,14 @@ function renderCombatBattle() {
   $("#monster-hp").textContent = fmt(Math.max(0, Math.ceil(state.monsterHp)));
   $("#monster-hp-max").textContent = fmt(maxHp);
   $("#monster-hp-bar").style.width = Math.max(0, 100 * state.monsterHp / maxHp) + "%";
+  // boss 10s timer
+  const timerEl = $("#boss-timer");
+  if (boss) {
+    const left = bossTimerCheck(Date.now());
+    timerEl.classList.remove("hidden");
+    timerEl.textContent = "⏱ " + (left / 1000).toFixed(1) + "s";
+    timerEl.classList.toggle("urgent", left < 4000);
+  } else timerEl.classList.add("hidden");
   $("#combat-gold").textContent = fmt(state.gold);
   $("#combat-sr").textContent = fmt(state.survivalRunes);
   $("#combat-tapdmg").textContent = fmt(cd.tapDmg);
@@ -1904,14 +1976,35 @@ function renderCombatBattle() {
     $("#player-dodge").textContent = (Math.round(cd.dodge * 1000) / 10) + "% dodge";
   } else hpWrap.classList.add("hidden");
 
-  // ▲ tier: fireball / magic
+  // ▲ tier: fireball / magic + castable spells
   const magicWrap = $("#magic-wrap");
   if (state.combatRank >= 6) {
     magicWrap.classList.remove("hidden");
     $("#magic-level").textContent = fmt(state.magicLevel);
     $("#magic-dmg").textContent = fmt(cd.magicDamage);
     $("#magic-bar").style.width = (100 * (state.magicProgress | 0) / magicReq(state.magicLevel)) + "%";
+    renderSpells();
   } else magicWrap.classList.add("hidden");
+}
+function renderSpells() {
+  const wrap = $("#spell-list");
+  const now = Date.now();
+  wrap.innerHTML = "";
+  for (const s of SPELLS) {
+    if (state.magicLevel < s.unlock) continue;
+    const cdReady = state.cooldowns[s.id] || 0;
+    const active = buffActive(s.id);
+    const onCd = cdReady > now && !active;
+    const b = document.createElement("button");
+    b.className = "spell-btn" + (active ? " active" : "");
+    b.disabled = onCd;
+    let status = active ? Math.ceil((state.buffs[s.id] - now) / 1000) + "s"
+      : onCd ? Math.ceil((cdReady - now) / 1000) + "s" : "ready";
+    b.innerHTML = `<span class="spell-emoji">${s.emoji}</span><span class="spell-name">${s.name}</span><span class="spell-status">${status}</span>`;
+    b.title = s.desc;
+    b.addEventListener("click", () => castSpell(s));
+    wrap.appendChild(b);
+  }
 }
 function renderCombatForge() {
   if (combatDirty) recomputeCombat();
@@ -1944,11 +2037,10 @@ function renderCombatTactics() {
 }
 function renderCombatRetreat() {
   $("#combat-sr2").textContent = fmt(state.survivalRunes);
-  const gain = retreatGain();
   const btn = $("#do-retreat");
-  btn.textContent = `Retreat — gain ${fmt(gain)} Survival Rune${gain === 1 ? "" : "s"}`;
-  btn.disabled = gain <= 0;
-  $("#retreat-info").innerHTML = `Highest level reached: <b>${fmt(state.highestLevel)}</b>. Retreat resets gold, level, Forge & Tactics — you keep Survival Runes and talents.`;
+  btn.textContent = "Retreat — restart the climb";
+  btn.disabled = state.combatRank === 0 && state.monsterLevel <= 1;
+  $("#retreat-info").innerHTML = `Depth reached: <b>${fmt(CBT.depth())}</b> (best ${fmt(state.highestLevel)}). Survival Runes come from <b>bosses</b>. Retreat resets gold, rank, Forge & Tactics so you can re-farm bosses — you keep Survival Runes and talents.`;
   const list = $("#combat-talent-list");
   list.innerHTML = "";
   for (const t of COMBAT_TALENTS) {
