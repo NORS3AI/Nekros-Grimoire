@@ -1357,6 +1357,11 @@ function renderStats() {
    ===================================================================== */
 const PATCH_NOTES = [
   {
+    v: "2.9.1", when: "2026-06-12", notes: [
+      "Combat Forge and Tactics each have a Buy All button that spends your gold cheapest-first.",
+    ],
+  },
+  {
     v: "2.9.0", when: "2026-06-12", notes: [
       "Forge and Tactics no longer wipe when you finish a 100-level run — they carry across ranks. Only Ascending (the combat reset, renamed from “Retreat”) wipes them.",
       "Lots of new upgrades: Herbalism & Mining each gain Bountiful Harvest/Motherlode, Greenhouse/Power Drill, a x1.5 yield master upgrade, and a stronger potency tier. Forge adds Fury, War Drums, Onslaught, Prospector, Toughness, Reflexes, Recovery and Sorcery. Tactics adds Warband, Cataclysm, War Cry, Juggernaut and Ascendant.",
@@ -2051,6 +2056,41 @@ function buyCombatResearch(r) {
   Sound.research();
   renderCombatTactics();
 }
+/* buy as many Forge / Tactics levels as gold allows, cheapest first */
+function buyAllForge() {
+  let bought = 0, guard = 0;
+  while (guard++ < 100000) {
+    let best = null, bestCost = Infinity;
+    for (const u of COMBAT_UP) {
+      if ((u.minRank || 0) > state.combatRank) continue;
+      if (u.max && (state.combatUp[u.id] | 0) >= u.max) continue;
+      const c = combatUpCost(u);
+      if (c <= state.gold && c < bestCost) { best = u; bestCost = c; }
+    }
+    if (!best) break;
+    state.gold -= bestCost;
+    state.combatUp[best.id] = (state.combatUp[best.id] | 0) + 1;
+    bought++;
+  }
+  if (bought > 0) { combatDirty = true; Sound.buy(); renderCombatForge(); }
+}
+function buyAllTactics() {
+  let bought = 0, guard = 0;
+  while (guard++ < 100000) {
+    let best = null, bestCost = Infinity;
+    for (const r of COMBAT_RESEARCH) {
+      if ((r.minRank || 0) > state.combatRank) continue;
+      if (state.highestLevel < r.unlock) continue;
+      const c = combatResearchCost(r);
+      if (c <= state.gold && c < bestCost) { best = r; bestCost = c; }
+    }
+    if (!best) break;
+    state.gold -= bestCost;
+    state.combatResearch[best.id] = (state.combatResearch[best.id] | 0) + 1;
+    bought++;
+  }
+  if (bought > 0) { combatDirty = true; Sound.research(); renderCombatTactics(); }
+}
 function buyCombatTalent(t) {
   const L = state.combatTalents[t.id] | 0;
   if (L >= (t.max || Infinity)) return;
@@ -2239,6 +2279,8 @@ function initProfessionsUI() {
   $("#monster-target").addEventListener("pointerdown", (e) => { e.preventDefault(); tapMonster(e); });
   $("#fireball-target").addEventListener("pointerdown", (e) => { e.preventDefault(); tapFireball(e); });
   $("#do-retreat").addEventListener("click", doRetreat);
+  $("#forge-buy-all").addEventListener("click", buyAllForge);
+  $("#tactics-buy-all").addEventListener("click", buyAllTactics);
   document.querySelectorAll("#tab-combat .subtab").forEach(s =>
     s.addEventListener("click", () => selectCombatSub(s.dataset.sub)));
 }
