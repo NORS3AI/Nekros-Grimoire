@@ -1388,6 +1388,11 @@ function renderStats() {
    ===================================================================== */
 const PATCH_NOTES = [
   {
+    v: "2.11.1", when: "2026-06-12", notes: [
+      "Dev panel: added Unlock Herbalism / Mining / Combat buttons.",
+    ],
+  },
+  {
     v: "2.11.0", when: "2026-06-12", notes: [
       "Herbalism and Mining now have a Buy All button (cheapest-first).",
       "Rich Veins now adds +0.2 ore per mine per level (still infinite).",
@@ -1702,6 +1707,20 @@ function initDevPanel() {
   devAdder("#dev-ore", "#dev-ore-custom", "#dev-ore-add", (v) => grantResource("ore", v));
   // Gold (combat)
   devAdder("#dev-gold", "#dev-gold-custom", "#dev-gold-add", (v) => { state.gold += v; }, [10, 100, 1000]);
+
+  // Unlock professions (sets the corresponding Void Rune talent)
+  const unlockWrap = $("#dev-unlock");
+  [["herbalism", "Herbalism"], ["mining", "Mining"], ["combat", "Combat"]].forEach(([id, label]) => {
+    const b = document.createElement("button");
+    b.textContent = "Unlock " + label;
+    b.addEventListener("click", () => {
+      state.talents[id] = Math.max(1, talentLevel(id));
+      dirty = true; combatDirty = true;
+      updateTabsVisibility();
+      refreshAll();
+    });
+    unlockWrap.appendChild(b);
+  });
 }
 
 /* =====================================================================
