@@ -173,13 +173,48 @@ function hasProfession(name) {
 function vrFromRunes(r) { return r >= 1e6 ? Math.floor(Math.log10(r)) - 5 : 0; }
 
 /* ---------- combat tuning ---------- */
-const COMBAT = {
-  monsterHp:  (lvl) => Math.ceil(10 * Math.pow(1.18, lvl - 1)),
-  srPerKill:  (lvl) => 1 + Math.floor((lvl - 1) / 5),
-  swordCost:  (lvl) => Math.ceil(5 * Math.pow(1.6, lvl)),
-  attackPower:() => 1 + 2 * (state.swordLevel | 0),
-  TAPS_PER_RESOURCE: 10,
+/* ---------- combat: a full idle/clicker sub-game ----------
+   Currencies: Gold (loot, spent on Forge upgrades & Tactics research) and
+   Survival Runes (prestige, earned from bosses & Retreat, spent on talents). */
+const TAPS_PER_RESOURCE = 10;   // herbalism / mining
+const CBT = {
+  isBoss:    (lvl) => lvl % 10 === 0,
+  monsterHp: (lvl) => Math.ceil((CBT.isBoss(lvl) ? 45 : 12) * Math.pow(1.20, lvl - 1)),
+  goldDrop:  (lvl) => Math.ceil(5 * Math.pow(1.17, lvl - 1)) * (CBT.isBoss(lvl) ? 8 : 1),
+  srDrop:    (lvl) => CBT.isBoss(lvl) ? Math.max(1, Math.floor(lvl / 10)) : 0,
+  retreatGain: () => Math.floor(Math.pow(Math.max(0, state.highestLevel - 1), 0.85)),
+  baseTap: 1,
 };
+
+/* Forge upgrades (bought with Gold) */
+const COMBAT_UP = [
+  { id:"sharpen",  name:"Sharpen Blade",   base:10,  growth:1.16, add:"tap",  desc:"+2 tap damage." },
+  { id:"familiar", name:"Summon Familiar", base:60,  growth:1.18, add:"auto", desc:"+1 damage per second (auto-attack)." },
+  { id:"whetstone",name:"Whetstone",       base:250, growth:1.26, special:"crit", desc:"+1% crit chance and +0.5 crit damage." },
+  { id:"greed",    name:"Greed",           base:120, growth:1.22, special:"gold", desc:"+10% gold from kills." },
+];
+/* Tactics research (bought with Gold, gated by highest level reached) */
+const COMBAT_RESEARCH = [
+  { id:"steel",    name:"Steel Edge",  unlock:5,  cost:1500,  fx:{dmgMult:2}, desc:"x2 tap damage." },
+  { id:"plunder",  name:"Plunder",     unlock:8,  cost:6000,  fx:{goldMult:2}, desc:"x2 gold." },
+  { id:"swarm",    name:"Swarm",       unlock:12, cost:30000, fx:{dpsMult:2}, desc:"x2 auto damage." },
+  { id:"warlord",  name:"Warlord",     unlock:20, cost:2e5,   fx:{allMult:2}, desc:"x2 ALL damage." },
+  { id:"fortune",  name:"Fortune",     unlock:28, cost:1e6,   fx:{goldMult:3}, desc:"x3 gold." },
+  { id:"berserk",  name:"Berserk",     unlock:38, cost:1e7,   fx:{dmgMult:3}, desc:"x3 tap damage." },
+  { id:"legion",   name:"Legion",      unlock:48, cost:1e8,   fx:{dpsMult:3}, desc:"x3 auto damage." },
+  { id:"godslayer",name:"Godslayer",   unlock:65, cost:5e9,   fx:{allMult:3}, desc:"x3 ALL damage." },
+];
+/* Retreat talents (bought with Survival Runes; persist through Retreat) */
+const COMBAT_TALENTS = [
+  { id:"might",     name:"Might",      cost:1, growth:1.5, max:50, fx:{dmgPct:25}, desc:"+25% tap damage." },
+  { id:"frenzy",    name:"Frenzy",     cost:1, growth:1.5, max:50, fx:{dpsPct:40}, desc:"+40% auto damage." },
+  { id:"avarice",   name:"Avarice",    cost:2, growth:1.6, max:50, fx:{goldPct:30}, desc:"+30% gold." },
+  { id:"bloodlust", name:"Bloodlust",  cost:3, growth:1.7, max:25, special:"crit", desc:"+5% crit chance, +2 crit damage." },
+  { id:"war_chest", name:"War Chest",  cost:2, growth:1.8, max:15, special:"startgold", desc:"Start each Retreat with more gold (x10 per level)." },
+  { id:"survivor",  name:"Survivor",   cost:5, growth:2.0, max:30, special:"srgain", desc:"+1 Survival Rune per Retreat." },
+];
+function combatUpCost(u) { return Math.ceil(u.base * Math.pow(u.growth, (state.combatUp[u.id] | 0))); }
+function combatTalentCost(t) { return Math.ceil(t.cost * Math.pow(t.growth || 1, (state.combatTalents[t.id] | 0))); }
 
 /* ---------- game state ---------- */
 let state = {
@@ -210,11 +245,15 @@ let state = {
   herbs: 0, herbProgress: 0,
   ores: 0, oreProgress: 0,
 
-  // combat (unlocked via talent; kept across rebirth)
+  // combat sub-game (unlocked via talent; kept across Grimoire rebirth)
+  gold: 0,
   survivalRunes: 0,
   monsterLevel: 1,
+  highestLevel: 1,
   monsterHp: null,       // current HP of the active monster (filled on first view)
-  swordLevel: 0,
+  combatUp: {},          // forge upgrade id -> level
+  combatResearch: {},    // tactics research id -> level
+  combatTalents: {},     // retreat talent id -> level
 
   // player settings
   settings: {
@@ -245,6 +284,43 @@ let d = {
 let dirty = true;
 let lifetimeTapEnabled = false;
 let pendingForcedRebirth = false;
+
+/* combat derived values */
+let cd = { tapDmg: 1, dps: 0, critChance: 0, critMult: 0, goldMult: 1 };
+let combatDirty = true;
+function recomputeCombat() {
+  const lv = (id) => (state.combatUp[id] | 0);
+  let tapAdd = CBT.baseTap + 2 * lv("sharpen");
+  let autoAdd = 1 * lv("familiar");
+  let critChance = Math.min(0.75, 0.01 * lv("whetstone"));
+  let critMult = lv("whetstone") > 0 ? 2 + 0.5 * lv("whetstone") : 0;
+  let goldPct = 10 * lv("greed");
+
+  let dmgMult = 1, dpsMult = 1, allMult = 1, goldMult = 1;
+  for (const r of COMBAT_RESEARCH) {
+    const L = state.combatResearch[r.id] | 0; if (!L) continue;
+    if (r.fx.dmgMult)  dmgMult  *= Math.pow(r.fx.dmgMult, L);
+    if (r.fx.dpsMult)  dpsMult  *= Math.pow(r.fx.dpsMult, L);
+    if (r.fx.allMult)  allMult  *= Math.pow(r.fx.allMult, L);
+    if (r.fx.goldMult) goldMult *= Math.pow(r.fx.goldMult, L);
+  }
+  let dmgPct = 0, dpsPct = 0, talGoldPct = 0;
+  for (const t of COMBAT_TALENTS) {
+    const L = state.combatTalents[t.id] | 0; if (!L) continue;
+    if (t.fx) {
+      if (t.fx.dmgPct)  dmgPct  += t.fx.dmgPct * L;
+      if (t.fx.dpsPct)  dpsPct  += t.fx.dpsPct * L;
+      if (t.fx.goldPct) talGoldPct += t.fx.goldPct * L;
+    }
+    if (t.special === "crit") { critChance += 0.05 * L; critMult += 2 * L; }
+  }
+  cd.tapDmg = tapAdd * dmgMult * allMult * (1 + dmgPct / 100);
+  cd.dps = autoAdd * dpsMult * allMult * (1 + dpsPct / 100);
+  cd.critChance = Math.min(0.9, critChance);
+  cd.critMult = critMult;
+  cd.goldMult = (1 + goldPct / 100) * goldMult * (1 + talGoldPct / 100);
+  combatDirty = false;
+}
 
 /* ---------- core math ---------- */
 function recompute() {
@@ -538,7 +614,8 @@ function ensureCard(key) {
 function updateCardEntry(entry, o) {
   const { btn, refs } = entry;
   entry.onBuy = o.onBuy || null;
-  const affordable = !o.locked && !o.maxed && state.runes >= o.cost;
+  const have = o.have != null ? o.have : state.runes;
+  const affordable = !o.locked && !o.maxed && have >= o.cost;
   btn.classList.toggle("affordable", affordable);
   btn.classList.toggle("locked", !!o.locked);
   btn.classList.toggle("maxed", !!o.maxed);
@@ -554,7 +631,7 @@ function updateCardEntry(entry, o) {
   let costClass, costText;
   if (o.maxed) { costClass = "card-cost lock"; costText = "MAX"; }
   else if (o.locked) { costClass = "card-cost lock"; costText = o.lockText || ""; }
-  else { costClass = "card-cost " + (affordable ? "ok" : "no"); costText = "✦ " + fmt(o.cost) + " runes"; }
+  else { costClass = "card-cost " + (affordable ? "ok" : "no"); costText = o.costText || ("✦ " + fmt(o.cost) + " runes"); }
   if (refs.cost.className !== costClass) refs.cost.className = costClass;
   if (refs.cost.textContent !== costText) refs.cost.textContent = costText;
 }
@@ -571,6 +648,11 @@ function syncList(listEl, items) {
     updateCardEntry(entry, item.data);
     if (listEl.children[idx] !== entry.btn) listEl.insertBefore(entry.btn, listEl.children[idx] || null);
   });
+}
+/* same reconciler, but affordability is measured against Gold (combat) */
+function syncListGold(listEl, items) {
+  items.forEach(i => { i.data.have = state.gold; });
+  syncList(listEl, items);
 }
 
 function renderUpgrades() {
@@ -682,15 +764,21 @@ function load() {
     Object.assign(state, s);
     state.research = s.research || {};
     state.talents = s.talents || {};
+    state.combatUp = s.combatUp || {};
+    state.combatResearch = s.combatResearch || {};
+    state.combatTalents = s.combatTalents || {};
     // merge nested objects so older saves still get new fields
     state.settings = { ...defaults.settings, ...(s.settings || {}) };
     state.dev = { ...defaults.dev, ...(s.dev || {}) };
     // numeric/back-compat defaults for fields added later
     const num = (k) => { if (typeof state[k] !== "number") state[k] = 0; };
     ["playTimeMs", "rebirths", "totalRunes", "totalTaps", "vr", "vrEarned",
-     "herbs", "herbProgress", "ores", "oreProgress", "survivalRunes", "swordLevel"].forEach(num);
+     "herbs", "herbProgress", "ores", "oreProgress", "survivalRunes", "gold"].forEach(num);
     if (typeof state.buyMode !== "number") state.buyMode = 1;
     if (typeof state.monsterLevel !== "number" || state.monsterLevel < 1) state.monsterLevel = 1;
+    if (typeof state.highestLevel !== "number" || state.highestLevel < state.monsterLevel) state.highestLevel = state.monsterLevel;
+    // migrate the old single sword upgrade into the new Forge
+    if (typeof s.swordLevel === "number" && s.swordLevel > 0 && !state.combatUp.sharpen) state.combatUp.sharpen = s.swordLevel;
     return true;
   } catch (e) { return false; }
 }
@@ -731,6 +819,17 @@ function accrueIdle() {
   if (d.idlePerSec > 0) addRunes(d.idlePerSec * sec);
 }
 
+/* combat auto-attack accrues from real elapsed time too (incl. background) */
+let lastCombat = Date.now();
+function accrueCombatTick() {
+  const now = Date.now();
+  let sec = (now - lastCombat) / 1000;
+  lastCombat = now;
+  if (sec <= 0) return;
+  sec = Math.min(sec, OFFLINE_CAP_SEC);
+  accrueCombat(sec);
+}
+
 /* ---------- main loop ---------- */
 let lastFrame = performance.now();
 let panelAccum = 0;
@@ -739,7 +838,9 @@ function loop(now) {
   lastFrame = now;
   if (!document.hidden) state.playTimeMs += dt * 1000;
   if (dirty || lifetimeTapEnabled) recompute();
+  if (combatDirty) recomputeCombat();
   accrueIdle();
+  accrueCombatTick();
   updateTop();
   checkResearchUnlock();
   checkForcedRebirth();
@@ -751,6 +852,7 @@ function loop(now) {
     renderBuyMode();
     updateTabsVisibility();
     if (!$("#research-tab").disabled) renderResearch();
+    if (!$("#tab-combat").classList.contains("hidden")) renderCombat();
     if (!$("#modal-overlay").classList.contains("hidden") && !$("#modal-stats").classList.contains("hidden")) renderStats();
   }
   requestAnimationFrame(loop);
@@ -1017,6 +1119,12 @@ function renderStats() {
    Patch Notes  — keep newest at the top; add an entry with every patch.
    ===================================================================== */
 const PATCH_NOTES = [
+  {
+    v: "2.1.0", when: "2026-06-12", notes: [
+      "Combat is now a full idle/clicker game with its own loop: tap to strike, auto-attack chips away on its own (even in the background), and monsters drop Gold. Every 10th foe is a boss.",
+      "Combat has four sub-tabs: Battle, Forge (spend Gold on tap damage, auto-attack, crit and gold-find), Tactics (Gold research unlocked by depth) and Retreat (its own prestige: reset for Survival Runes and spend them on combat talents).",
+    ],
+  },
   {
     v: "2.0.0", when: "2026-06-12", notes: [
       "Rebirth: at 4 Comprehension you enter the Void for the first time. Rebirthing wipes your life but grants Void Runes (1 per power-of-ten of runes gathered, from 1M up).",
@@ -1330,7 +1438,7 @@ function gatherProfession(kind) {
   const progKey = kind === "herb" ? "herbProgress" : "oreProgress";
   const countKey = kind === "herb" ? "herbs" : "ores";
   state[progKey] = (state[progKey] | 0) + 1;
-  if (state[progKey] >= COMBAT.TAPS_PER_RESOURCE) {
+  if (state[progKey] >= TAPS_PER_RESOURCE) {
     state[progKey] = 0;
     state[countKey] = (state[countKey] | 0) + 1;
     dirty = true; // resource bonuses feed recompute
@@ -1343,65 +1451,206 @@ function renderProfession(kind) {
   const count = isHerb ? state.herbs : state.ores;
   const prog = isHerb ? state.herbProgress : state.oreProgress;
   $(isHerb ? "#herb-count" : "#ore-count").textContent = fmt(count);
-  const bar = $(isHerb ? "#herb-bar" : "#ore-bar");
-  bar.style.width = (100 * prog / COMBAT.TAPS_PER_RESOURCE) + "%";
+  $(isHerb ? "#herb-bar" : "#ore-bar").style.width = (100 * prog / TAPS_PER_RESOURCE) + "%";
 }
 
 /* =====================================================================
-   Combat: tap a monster, kill it for Survival Runes
+   Combat — a self-contained idle/clicker game
    ===================================================================== */
+let combatSub = "battle";
+
 function ensureMonster() {
-  if (state.monsterHp == null || state.monsterHp <= 0) {
-    state.monsterHp = COMBAT.monsterHp(state.monsterLevel);
+  if (state.monsterHp == null || state.monsterHp <= 0 || !isFinite(state.monsterHp)) {
+    state.monsterHp = CBT.monsterHp(state.monsterLevel);
   }
 }
-function attackMonster() {
+function killMonster() {
+  const lvl = state.monsterLevel;
+  state.gold += CBT.goldDrop(lvl) * cd.goldMult;
+  const sr = CBT.srDrop(lvl);
+  if (sr > 0) state.survivalRunes += sr;
+  state.monsterLevel++;
+  if (state.monsterLevel > state.highestLevel) state.highestLevel = state.monsterLevel;
+  state.monsterHp = CBT.monsterHp(state.monsterLevel);
+}
+function tapMonster(ev) {
+  if (combatDirty) recomputeCombat();
   ensureMonster();
-  state.monsterHp -= COMBAT.attackPower();
-  if (state.monsterHp <= 0) {
-    const sr = COMBAT.srPerKill(state.monsterLevel);
-    state.survivalRunes += sr;
-    state.monsterLevel++;
-    state.monsterHp = COMBAT.monsterHp(state.monsterLevel);
-    Sound.buy();
-  } else {
-    Sound.tap(false);
-  }
-  renderCombat();
+  let dmg = cd.tapDmg, crit = false;
+  if (cd.critMult > 0 && Math.random() < cd.critChance) { dmg *= cd.critMult; crit = true; }
+  state.monsterHp -= dmg;
+  spawnCombatFloat(ev, dmg, crit);
+  if (state.monsterHp <= 0) { killMonster(); Sound.buy(); }
+  else Sound.tap(false);
+  if (combatSub === "battle") renderCombatBattle();
 }
-function buySword() {
-  const cost = COMBAT.swordCost(state.swordLevel);
+/* idle auto-attack from real elapsed time (also runs in the background) */
+function accrueCombat(sec) {
+  if (!hasProfession("combat")) return;
+  if (combatDirty) recomputeCombat();
+  if (cd.dps <= 0) { ensureMonster(); return; }
+  ensureMonster();
+  let dmg = cd.dps * sec, guard = 0;
+  while (dmg > 0 && guard < 100000) {
+    if (dmg >= state.monsterHp) { dmg -= state.monsterHp; state.monsterHp = 0; killMonster(); guard++; }
+    else { state.monsterHp -= dmg; dmg = 0; }
+  }
+}
+function spawnCombatFloat(ev, dmg, crit) {
+  const layer = $("#combat-float");
+  if (!layer || !ev) return;
+  const rect = layer.getBoundingClientRect();
+  const f = document.createElement("div");
+  f.className = "float-num" + (crit ? " crit" : "");
+  f.textContent = (crit ? "CRIT " : "") + fmt(dmg);
+  f.style.left = (ev.clientX - rect.left) + "px";
+  f.style.top = (ev.clientY - rect.top) + "px";
+  layer.appendChild(f);
+  setTimeout(() => f.remove(), 900);
+}
+
+function buyCombatUp(u) {
+  const cost = combatUpCost(u);
+  if (state.gold < cost) return;
+  state.gold -= cost;
+  state.combatUp[u.id] = (state.combatUp[u.id] | 0) + 1;
+  combatDirty = true;
+  Sound.buy();
+  renderCombatForge();
+}
+function buyCombatResearch(r) {
+  if ((state.combatResearch[r.id] | 0) > 0) return;
+  if (state.highestLevel < r.unlock || state.gold < r.cost) return;
+  state.gold -= r.cost;
+  state.combatResearch[r.id] = 1;
+  combatDirty = true;
+  Sound.research();
+  renderCombatTactics();
+}
+function buyCombatTalent(t) {
+  const L = state.combatTalents[t.id] | 0;
+  if (L >= (t.max || Infinity)) return;
+  const cost = combatTalentCost(t);
   if (state.survivalRunes < cost) return;
   state.survivalRunes -= cost;
-  state.swordLevel++;
+  state.combatTalents[t.id] = L + 1;
+  combatDirty = true;
+  Sound.buy();
+  renderCombatRetreat();
+}
+function retreatGain() {
+  return CBT.retreatGain() + (state.combatTalents.survivor | 0);
+}
+function doRetreat() {
+  const gain = retreatGain();
+  if (gain <= 0) return;
+  state.survivalRunes += gain;
+  // reset the combat run (keep SR + combat talents)
+  state.gold = (state.combatTalents.war_chest | 0) > 0 ? Math.pow(10, state.combatTalents.war_chest | 0) : 0;
+  state.monsterLevel = 1;
+  state.highestLevel = 1;
+  state.monsterHp = CBT.monsterHp(1);
+  state.combatUp = {};
+  state.combatResearch = {};
+  combatDirty = true;
   Sound.research();
+  renderCombatRetreat();
+  renderCombatBattle();
+}
+
+/* ----- combat rendering (sub-tabs: Battle / Forge / Tactics / Retreat) ----- */
+function selectCombatSub(which) {
+  combatSub = which;
+  document.querySelectorAll("#tab-combat .subtab").forEach(s => s.classList.toggle("active", s.dataset.sub === which));
+  document.querySelectorAll("#tab-combat .subcontent").forEach(c => c.classList.toggle("hidden", c.id !== "sub-" + which));
   renderCombat();
 }
 function renderCombat() {
+  if (combatDirty) recomputeCombat();
+  if (combatSub === "battle") renderCombatBattle();
+  else if (combatSub === "forge") renderCombatForge();
+  else if (combatSub === "tactics") renderCombatTactics();
+  else if (combatSub === "retreat") renderCombatRetreat();
+}
+function renderCombatBattle() {
+  if (combatDirty) recomputeCombat();
   ensureMonster();
-  const maxHp = COMBAT.monsterHp(state.monsterLevel);
-  $("#monster-level").textContent = fmt(state.monsterLevel);
+  const maxHp = CBT.monsterHp(state.monsterLevel);
+  const boss = CBT.isBoss(state.monsterLevel);
+  $("#monster-emoji").textContent = boss ? "🐉" : "👹";
+  $("#monster-name").textContent = (boss ? "BOSS — Lv " : "Lv ") + fmt(state.monsterLevel) + (boss ? "" : " Fiend");
   $("#monster-hp").textContent = fmt(Math.max(0, Math.ceil(state.monsterHp)));
   $("#monster-hp-max").textContent = fmt(maxHp);
   $("#monster-hp-bar").style.width = Math.max(0, 100 * state.monsterHp / maxHp) + "%";
-  $("#survival-runes").textContent = fmt(state.survivalRunes);
-  $("#attack-power").textContent = fmt(COMBAT.attackPower());
-  const cost = COMBAT.swordCost(state.swordLevel);
-  const sword = $("#sword-upgrade");
-  const can = state.survivalRunes >= cost;
-  sword.classList.toggle("affordable", can);
-  sword.disabled = !can;
-  sword.innerHTML =
-    `<div class="card-head"><span class="card-name">Sharpen Sword</span><span class="card-level">Lv ${state.swordLevel}</span></div>` +
-    `<div class="card-desc">+2 attack power.</div>` +
-    `<span class="card-cost ${can ? "ok" : "no"}">⚔ ${fmt(cost)} Survival Runes</span>`;
+  $("#combat-gold").textContent = fmt(state.gold);
+  $("#combat-sr").textContent = fmt(state.survivalRunes);
+  $("#combat-tapdmg").textContent = fmt(cd.tapDmg);
+  $("#combat-dps").textContent = fmt(cd.dps);
+  const critEl = $("#combat-crit");
+  if (cd.critMult > 0) { critEl.classList.remove("hidden"); critEl.textContent = `${Math.round(cd.critChance * 100)}% crit · x${fmt(cd.critMult)}`; }
+  else critEl.classList.add("hidden");
+}
+function renderCombatForge() {
+  if (combatDirty) recomputeCombat();
+  $("#forge-gold").textContent = fmt(state.gold);
+  const items = COMBAT_UP.map(u => {
+    const cost = combatUpCost(u);
+    return { key: "cu-" + u.id, data: {
+      name: u.name, levelText: `Lv ${state.combatUp[u.id] | 0}`, desc: u.desc,
+      cost, costText: `⟡ ${fmt(cost)} gold`, onBuy: () => buyCombatUp(u),
+    } };
+  });
+  syncListGold($("#forge-list"), items);
+}
+function renderCombatTactics() {
+  $("#tactics-gold").textContent = fmt(state.gold);
+  const items = [];
+  for (const r of COMBAT_RESEARCH) {
+    const owned = (state.combatResearch[r.id] | 0) > 0;
+    const unlocked = state.highestLevel >= r.unlock;
+    if (!unlocked && !owned && state.highestLevel < r.unlock - 5) continue; // hide far-off ones
+    items.push({ key: "ct-" + r.id, data: {
+      name: r.name, levelText: owned ? "Researched" : "", desc: r.desc,
+      cost: r.cost, costText: `⟡ ${fmt(r.cost)} gold`,
+      locked: !unlocked, lockText: !unlocked ? `🔒 Reach Lv ${r.unlock}` : null,
+      maxed: owned, onBuy: () => buyCombatResearch(r),
+    } });
+  }
+  syncListGold($("#tactics-list"), items);
+}
+function renderCombatRetreat() {
+  $("#combat-sr2").textContent = fmt(state.survivalRunes);
+  const gain = retreatGain();
+  const btn = $("#do-retreat");
+  btn.textContent = `Retreat — gain ${fmt(gain)} Survival Rune${gain === 1 ? "" : "s"}`;
+  btn.disabled = gain <= 0;
+  $("#retreat-info").innerHTML = `Highest level reached: <b>${fmt(state.highestLevel)}</b>. Retreat resets gold, level, Forge & Tactics — you keep Survival Runes and talents.`;
+  const list = $("#combat-talent-list");
+  list.innerHTML = "";
+  for (const t of COMBAT_TALENTS) {
+    const L = state.combatTalents[t.id] | 0;
+    const maxed = L >= (t.max || Infinity);
+    const cost = combatTalentCost(t);
+    const can = !maxed && state.survivalRunes >= cost;
+    const b = document.createElement("button");
+    b.className = "card talent" + (can ? " affordable" : "") + (maxed ? " maxed" : "");
+    b.disabled = !can;
+    b.innerHTML =
+      `<div class="card-head"><span class="card-name">${t.name}</span><span class="card-level">Lv ${L}${isFinite(t.max) ? "/" + t.max : ""}</span></div>` +
+      `<div class="card-desc">${t.desc}</div>` +
+      `<span class="card-cost ${maxed ? "lock" : can ? "ok" : "no"}">${maxed ? "MAX" : "🜂 " + fmt(cost) + " SR"}</span>`;
+    if (can) b.addEventListener("click", () => buyCombatTalent(t));
+    list.appendChild(b);
+  }
 }
 
 function initProfessionsUI() {
   $("#herb-target").addEventListener("pointerdown", (e) => { e.preventDefault(); gatherProfession("herb"); });
   $("#ore-target").addEventListener("pointerdown", (e) => { e.preventDefault(); gatherProfession("ore"); });
-  $("#monster-target").addEventListener("pointerdown", (e) => { e.preventDefault(); attackMonster(); });
-  $("#sword-upgrade").addEventListener("click", buySword);
+  $("#monster-target").addEventListener("pointerdown", (e) => { e.preventDefault(); tapMonster(e); });
+  $("#do-retreat").addEventListener("click", doRetreat);
+  document.querySelectorAll("#tab-combat .subtab").forEach(s =>
+    s.addEventListener("click", () => selectCombatSub(s.dataset.sub)));
 }
 
 /* ---------- boot ---------- */
@@ -1437,12 +1686,16 @@ function init() {
   if (state.comprehension >= 4 && !state.forcedRebirthDone) pendingForcedRebirth = true;
 
   setInterval(save, 10000);
-  // keep gathering idle runes in the background (rAF is paused when hidden)
+  // keep gathering idle runes & combat in the background (rAF is paused when hidden)
   lastIdle = Date.now();
-  setInterval(accrueIdle, 1000);
+  lastCombat = state.lastSave || Date.now();   // catch up combat over offline time
+  recomputeCombat();
+  accrueCombatTick();
+  const tickBackground = () => { accrueIdle(); accrueCombatTick(); };
+  setInterval(tickBackground, 1000);
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) { accrueIdle(); save(); }
-    else { accrueIdle(); lastFrame = performance.now(); updateTop(); }
+    if (document.hidden) { tickBackground(); save(); }
+    else { tickBackground(); lastFrame = performance.now(); updateTop(); }
   });
   window.addEventListener("beforeunload", save);
 

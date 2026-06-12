@@ -95,19 +95,53 @@
     </div>
 
     <div class="tab-content hidden" id="tab-combat">
-      <div class="combat">
-        <div class="monster" id="monster-target">
-          <div class="monster-emoji">👹</div>
-          <div class="monster-name">Lv <span id="monster-level">1</span> Fiend</div>
-          <div class="hp-bar"><div id="monster-hp-bar"></div></div>
-          <div class="hp-text"><span id="monster-hp">0</span> / <span id="monster-hp-max">0</span> HP</div>
+      <div class="subtabs">
+        <button class="subtab active" data-sub="battle">Battle</button>
+        <button class="subtab" data-sub="forge">Forge</button>
+        <button class="subtab" data-sub="tactics">Tactics</button>
+        <button class="subtab" data-sub="retreat">Retreat</button>
+      </div>
+
+      <div class="subcontent" id="sub-battle">
+        <div class="combat">
+          <div class="monster" id="monster-target">
+            <div class="monster-emoji" id="monster-emoji">👹</div>
+            <div class="monster-name" id="monster-name">Lv 1 Fiend</div>
+            <div class="hp-bar"><div id="monster-hp-bar"></div></div>
+            <div class="hp-text"><span id="monster-hp">0</span> / <span id="monster-hp-max">0</span> HP</div>
+            <div id="combat-float" class="float-layer"></div>
+          </div>
+          <div class="combat-stats">
+            <span>⚔ <b id="combat-tapdmg">1</b> / hit</span>
+            <span>🌀 <b id="combat-dps">0</b> / sec</span>
+            <span id="combat-crit" class="crit-stat hidden"></span>
+          </div>
+          <div class="combat-stats">
+            <span>⟡ <b id="combat-gold">0</b> gold</span>
+            <span>🜂 <b id="combat-sr">0</b> Survival Runes</span>
+          </div>
+          <p class="muted">Tap the monster to strike it. Auto-attack chips away on its own. Every 10th foe is a boss that drops Survival Runes.</p>
         </div>
-        <div class="combat-stats">
-          <span>⚔ Attack <b id="attack-power">1</b></span>
-          <span>🜂 <b id="survival-runes">0</b> Survival Runes</span>
+      </div>
+
+      <div class="subcontent hidden" id="sub-forge">
+        <p class="research-intro">Spend <b>gold</b> looted from monsters to forge your power. (Gold: <b id="forge-gold">0</b>)</p>
+        <div id="forge-list" class="list"></div>
+      </div>
+
+      <div class="subcontent hidden" id="sub-tactics">
+        <p class="research-intro">Permanent combat research, bought with gold and unlocked by reaching deeper levels. (Gold: <b id="tactics-gold">0</b>)</p>
+        <div id="tactics-list" class="list"></div>
+      </div>
+
+      <div class="subcontent hidden" id="sub-retreat">
+        <div class="void-summary">
+          <div class="vr-balance-line">Survival Runes: <b id="combat-sr2">0</b></div>
+          <div id="retreat-info" class="muted"></div>
+          <button class="rebirth-do" id="do-retreat">Retreat</button>
         </div>
-        <button class="card" id="sword-upgrade"></button>
-        <p class="muted">Tap the monster to strike it. Slain monsters drop Survival Runes.</p>
+        <h3>Combat Talents</h3>
+        <div id="combat-talent-list" class="list"></div>
       </div>
     </div>
 

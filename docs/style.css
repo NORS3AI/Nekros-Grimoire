@@ -550,3 +550,14 @@ body {
 .card.talent .card-cost.ok { color: var(--turquoise); }
 .card.talent { border-color: #4a2f80; }
 .card.talent.affordable { border-color: var(--turquoise); box-shadow: 0 0 10px rgba(46,230,214,0.18); }
+
+/* ===== Combat sub-tabs ===== */
+.subtabs { display: flex; gap: 4px; margin-bottom: 12px; background: rgba(0,0,0,0.25); border-radius: 10px; padding: 3px; }
+.subtab {
+  flex: 1; padding: 7px 4px; background: transparent; border: none; color: var(--ink-dim);
+  font-size: 0.8rem; font-weight: 700; border-radius: 8px; cursor: pointer;
+}
+.subtab.active { background: var(--panel-2); color: var(--ink); }
+.subcontent { min-height: 0; }
+.monster { position: relative; }
+.monster #combat-float { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
