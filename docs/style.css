@@ -586,3 +586,21 @@ body {
 .talent-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 10px 0 8px; }
 .talent-head h3 { margin: 0; }
 .good-text { color: var(--good); font-size: 0.82rem; }
+
+/* ===== Combat: player HP & magic ===== */
+.player-hp-wrap { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 4px; }
+.hp-label { font-size: 0.85rem; color: var(--ink); }
+.hp-bar.player { border-color: var(--good); }
+.hp-bar.player #player-hp-bar { height: 100%; width: 100%; background: linear-gradient(90deg, #5cf08a, #2ee6d6); transition: width 0.12s linear; }
+#player-hp-bar { height: 100%; }
+.magic-wrap { display: flex; align-items: center; gap: 12px; width: 100%; justify-content: center; margin-top: 4px; }
+.fireball {
+  font-size: clamp(2.4rem, 12vw, 3.4rem); line-height: 1; cursor: pointer;
+  user-select: none; -webkit-user-select: none; transition: transform 0.06s ease;
+  filter: drop-shadow(0 0 10px #ff8a3a);
+}
+.fireball:active { transform: scale(0.82); }
+.magic-info { font-size: 0.82rem; min-width: 0; }
+.magic-progress { width: 140px; max-width: 40vw; height: 6px; border-radius: 5px; background: rgba(255,255,255,0.1); overflow: hidden; margin: 4px 0; }
+.magic-bar { height: 100%; width: 0%; background: linear-gradient(90deg, #ff8a3a, #ffd66b); transition: width 0.1s linear; }
+.float-num.magic-hit { color: #ff9a4a; }

@@ -115,6 +115,22 @@
             <div class="hp-text"><span id="monster-hp">0</span> / <span id="monster-hp-max">0</span> HP</div>
             <div id="combat-float" class="float-layer"></div>
           </div>
+
+          <div id="player-hp-wrap" class="player-hp-wrap hidden">
+            <div class="hp-label">🛡 You <span id="player-dodge" class="muted"></span></div>
+            <div class="hp-bar player"><div id="player-hp-bar"></div></div>
+            <div class="hp-text"><span id="player-hp">0</span> / <span id="player-hp-max">0</span> HP</div>
+          </div>
+
+          <div id="magic-wrap" class="magic-wrap hidden">
+            <div class="fireball" id="fireball-target">🔥</div>
+            <div class="magic-info">
+              <div>Magic Lv <b id="magic-level">0</b> · <b id="magic-dmg">0</b> dmg</div>
+              <div class="magic-progress"><div id="magic-bar" class="magic-bar"></div></div>
+              <div class="muted">Tap the fireball to cast it and learn spells.</div>
+            </div>
+          </div>
+
           <div class="combat-stats">
             <span>⚔ <b id="combat-tapdmg">1</b> / hit</span>
             <span>🌀 <b id="combat-dps">0</b> / sec</span>
@@ -124,7 +140,7 @@
             <span>⟡ <b id="combat-gold">0</b> gold</span>
             <span>🜂 <b id="combat-sr">0</b> Survival Runes</span>
           </div>
-          <p class="muted">Tap the monster to strike it. Auto-attack chips away on its own. Every 10th foe is a boss that drops Survival Runes.</p>
+          <p class="muted">Tap the monster to strike it. Auto-attack chips away on its own. Clear 10 bosses (100 levels) to earn a star — then the monster fights back!</p>
         </div>
       </div>
 
