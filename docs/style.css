@@ -487,3 +487,66 @@ body {
   color: var(--ink); border-radius: 8px; padding: 7px 10px; font-size: 0.85rem;
 }
 .dev-custom .ghost-btn { margin-top: 0; width: auto; padding: 7px 14px; }
+
+/* ===== Tabs: allow many tabs to scroll horizontally instead of wrapping ===== */
+.tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { flex: 1 0 auto; white-space: nowrap; padding: 12px 12px; font-size: 0.88rem; }
+
+/* ===== Buy modes ===== */
+.buy-modes { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+.buy-modes-label { font-size: 0.78rem; color: var(--ink-dim); text-transform: uppercase; letter-spacing: 0.08em; }
+.buymode-btn {
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--ink);
+  border-radius: 8px; padding: 6px 12px; font-size: 0.82rem; font-weight: 700; cursor: pointer;
+}
+.buymode-btn:hover:not(:disabled) { border-color: var(--turquoise); }
+.buymode-btn.active { border-color: var(--turquoise); background: rgba(46,230,214,0.16); color: var(--ink); }
+.buymode-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ===== Professions (Herbalism / Mining) ===== */
+.prof { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 10px 0; text-align: center; }
+.prof-target {
+  font-size: clamp(4rem, 22vw, 7rem);
+  line-height: 1; cursor: pointer; user-select: none; -webkit-user-select: none;
+  filter: drop-shadow(0 6px 16px rgba(0,0,0,0.5));
+  transition: transform 0.06s ease;
+}
+.prof-target:active { transform: scale(0.85); }
+.prof-count { font-size: 1.3rem; font-weight: 800; color: var(--good); }
+.prof-progress { width: min(260px, 80%); height: 8px; border-radius: 6px; background: rgba(255,255,255,0.1); overflow: hidden; }
+.prof-bar { height: 100%; width: 0%; background: linear-gradient(90deg, var(--good), var(--turquoise)); transition: width 0.08s linear; }
+.prof .muted { max-width: 320px; }
+
+/* ===== Combat ===== */
+.combat { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 6px 0; text-align: center; }
+.monster {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  cursor: pointer; user-select: none; -webkit-user-select: none; width: 100%;
+}
+.monster-emoji { font-size: clamp(3.4rem, 18vw, 6rem); line-height: 1; transition: transform 0.06s ease; filter: drop-shadow(0 6px 16px rgba(0,0,0,0.5)); }
+.monster:active .monster-emoji { transform: scale(0.86) rotate(-4deg); }
+.monster-name { font-weight: 700; color: var(--ink); }
+.hp-bar { width: min(280px, 86%); height: 12px; border-radius: 8px; background: rgba(255,255,255,0.1); overflow: hidden; border: 1px solid var(--border); }
+#monster-hp-bar { height: 100%; width: 100%; background: linear-gradient(90deg, #ff5e5e, #ff9a5e); transition: width 0.1s linear; }
+.hp-text { font-size: 0.82rem; color: var(--ink-dim); }
+.combat-stats { display: flex; gap: 18px; flex-wrap: wrap; justify-content: center; font-size: 0.9rem; }
+.combat .card { width: 100%; }
+
+/* ===== The Void / Rebirth ===== */
+.void-summary {
+  display: flex; flex-direction: column; gap: 8px; align-items: stretch;
+  padding: 12px; border: 1px solid var(--border); border-radius: 12px;
+  background: rgba(46,230,214,0.05); margin-bottom: 12px;
+}
+.vr-balance-line { font-size: 1.1rem; }
+.vr-balance-line b, #vr-gain-line b { color: var(--turquoise); }
+.rebirth-do {
+  background: linear-gradient(180deg, #5b2a9e, #3a1670); color: #fff; border: 1px solid var(--turquoise);
+  border-radius: 10px; padding: 12px; font-size: 1rem; font-weight: 800; cursor: pointer;
+}
+.rebirth-do:hover { box-shadow: 0 0 16px rgba(46,230,214,0.4); }
+.footer-btn#rebirth-btn { border-color: var(--turquoise); }
+.card.talent .card-cost.ok { color: var(--turquoise); }
+.card.talent { border-color: #4a2f80; }
+.card.talent.affordable { border-color: var(--turquoise); box-shadow: 0 0 10px rgba(46,230,214,0.18); }

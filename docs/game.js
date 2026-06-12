@@ -130,21 +130,91 @@ function effectTag(r) {
   return "";
 }
 
+/* ---------- talent tree (bought with Void Runes; persists across rebirth) ----------
+   fx effects fold into recompute exactly like research percentages.
+   unlock: reveals a profession page. */
+const TALENTS = [
+  { id:"strength",  name:"Strength of Hit", cost:1,  growth:1.55, max:50, fx:{tapPct:50},
+    desc:"+50% runes per tap." },
+  { id:"swiftness", name:"Swiftness",       cost:1,  growth:1.55, max:50, fx:{idlePct:50},
+    desc:"+50% idle rune gain." },
+  { id:"time_dilation", name:"Time Dilation", cost:2, growth:1.7, max:30, fx:{allPct:20},
+    desc:"+20% ALL rune gain (your studies move faster)." },
+  { id:"void_edge", name:"Void Edge",       cost:3,  growth:1.8,  max:25, special:"crit",
+    desc:"Unlock critical hits (5% chance, x10). Each extra level: +2% crit chance, +5 crit damage." },
+  { id:"void_power", name:"Void Attunement", cost:3, growth:1.75, max:40, special:"vrpower",
+    desc:"+5% ALL rune gain for every Void Rune you have ever earned." },
+  { id:"head_start", name:"Head Start",     cost:2,  growth:1.8,  max:20, special:"headstart",
+    desc:"Begin each life with more runes (x10 per level)." },
+  { id:"greater_sacrifice", name:"Greater Sacrifice", cost:5, growth:2, max:30, special:"vrgain",
+    desc:"+1 Void Rune gained on every rebirth." },
+  // profession unlocks
+  { id:"herbalism", name:"Herbalism", cost:3,  max:1, unlock:"herbalism",
+    desc:"Unlock the Herbalism page — tap herbs to gather them (10 taps each)." },
+  { id:"mining",    name:"Mining",    cost:6,  max:1, unlock:"mining",
+    desc:"Unlock the Mining page — tap ore to mine it (10 taps each)." },
+  { id:"combat",    name:"Path of the Sword", cost:20, max:1, unlock:"combat",
+    desc:"Unlock Combat — slay monsters for loot and Survival Runes." },
+];
+const TALENT_BY_ID = Object.fromEntries(TALENTS.map(t => [t.id, t]));
+
+function talentLevel(id) { return state.talents[id] | 0; }
+function talentMax(t) { return t.max || Infinity; }
+function talentCost(t) {
+  const L = talentLevel(t.id);
+  return Math.ceil(t.cost * Math.pow(t.growth || 1, L));
+}
+function hasProfession(name) {
+  const t = TALENTS.find(x => x.unlock === name);
+  return t ? talentLevel(t.id) > 0 : false;
+}
+
+/* Void Runes from a life's gathered runes: one per power-of-ten from 1e6 up */
+function vrFromRunes(r) { return r >= 1e6 ? Math.floor(Math.log10(r)) - 5 : 0; }
+
+/* ---------- combat tuning ---------- */
+const COMBAT = {
+  monsterHp:  (lvl) => Math.ceil(10 * Math.pow(1.18, lvl - 1)),
+  srPerKill:  (lvl) => 1 + Math.floor((lvl - 1) / 5),
+  swordCost:  (lvl) => Math.ceil(5 * Math.pow(1.6, lvl)),
+  attackPower:() => 1 + 2 * (state.swordLevel | 0),
+  TAPS_PER_RESOURCE: 10,
+};
+
 /* ---------- game state ---------- */
 let state = {
   runes: 0,
-  lifetimeRunes: 0,
-  lifetimeTaps: 0,
+  lifetimeRunes: 0,      // gathered THIS life (gates research/comprehension/VR; reset on rebirth)
+  lifetimeTaps: 0,       // taps THIS life (reset on rebirth)
   comprehension: 0,
   proficiency: 0,
   flow: 0,
   research: {},          // id -> level
   lastSave: Date.now(),
 
-  // play-time & progression stats
+  // play-time & progression stats (kept across rebirth)
   playTimeMs: 0,
+  totalRunes: 0,         // all-time gathered, never reset
+  totalTaps: 0,          // all-time taps, never reset
   rebirths: 0,
   rebirthUnlocked: false,
+  forcedRebirthDone: false,
+
+  // prestige
+  vr: 0,                 // Void Runes (current balance)
+  vrEarned: 0,           // total Void Runes ever earned (for Void Attunement)
+  talents: {},           // talentId -> level
+  buyMode: 1,            // 1, 5, or Infinity (Buy All)
+
+  // professions (unlocked via talents; kept across rebirth)
+  herbs: 0, herbProgress: 0,
+  ores: 0, oreProgress: 0,
+
+  // combat (unlocked via talent; kept across rebirth)
+  survivalRunes: 0,
+  monsterLevel: 1,
+  monsterHp: null,       // current HP of the active monster (filled on first view)
+  swordLevel: 0,
 
   // player settings
   settings: {
@@ -174,6 +244,7 @@ let d = {
 };
 let dirty = true;
 let lifetimeTapEnabled = false;
+let pendingForcedRebirth = false;
 
 /* ---------- core math ---------- */
 function recompute() {
@@ -207,6 +278,26 @@ function recompute() {
       }
     }
   }
+
+  // ----- talents (Void Rune tree; persist across rebirth) -----
+  for (const t of TALENTS) {
+    const L = talentLevel(t.id);
+    if (L <= 0) continue;
+    if (t.fx) {
+      if (t.fx.tapPct)  tapPct  += t.fx.tapPct * L;
+      if (t.fx.idlePct) idlePct += t.fx.idlePct * L;
+      if (t.fx.allPct)  allPct  += t.fx.allPct * L;
+    }
+    if (t.special === "crit") {
+      critChance += 0.05 + 0.02 * (L - 1);
+      critMult   += 10 + 5 * (L - 1);
+    }
+    if (t.special === "vrpower") allPct += 5 * L * (state.vrEarned | 0);
+  }
+
+  // ----- profession bonuses (gathered resources give a small permanent edge) -----
+  allPct += 0.1 * (state.herbs | 0);   // herbs boost all rune gain
+  tapPct += 0.2 * (state.ores | 0);    // ore boosts tap power
 
   // additive bonuses first
   const tapAdd  = PROF_ADD * state.proficiency * profAddMult;
@@ -253,10 +344,13 @@ function addRunes(v) {
   if (v <= 0) return;
   state.runes += v;
   state.lifetimeRunes += v;
+  state.totalRunes += v;
   // award comprehension for crossing lifetime thresholds
   while (state.lifetimeRunes >= compThreshold(state.comprehension)) {
     state.comprehension++;
     dirty = true;
+    // the first time you reach 4 Comprehension you are forced to Rebirth
+    if (state.comprehension >= 4 && !state.forcedRebirthDone) pendingForcedRebirth = true;
   }
 }
 
@@ -340,6 +434,7 @@ function onCellTap(i, ev) {
   // one tap = one rune, and the glowing rune jumps to a new random cell
   addRunes(val);
   state.lifetimeTaps++;
+  state.totalTaps++;
   spawnFloat(ev, val, crit);
   Sound.tap(crit);
   rerollActive();
@@ -359,21 +454,24 @@ function spawnFloat(ev, val, crit) {
   setTimeout(() => f.remove(), 900);
 }
 
-/* ---------- purchases ---------- */
-function buyProficiency() {
-  const c = proficiencyCost();
-  if (state.runes < c) return;
-  state.runes -= c; state.proficiency++; dirty = true;
-  Sound.buy();
-  refreshAll();
+/* ---------- purchases ----------
+   buy modes: state.buyMode is 1, 5, or Infinity (Buy All). Each tap buys up
+   to that many levels that the player can currently afford. */
+function buyLevels(costFn, applyFn) {
+  const want = state.buyMode;
+  let bought = 0;
+  while (bought < want) {
+    const c = costFn();
+    if (state.runes < c) break;
+    state.runes -= c;
+    applyFn();
+    bought++;
+    if (bought >= 100000) break; // safety for Buy All
+  }
+  if (bought > 0) { dirty = true; Sound.buy(); refreshAll(); }
 }
-function buyFlow() {
-  const c = flowCost();
-  if (state.runes < c) return;
-  state.runes -= c; state.flow++; dirty = true;
-  Sound.buy();
-  refreshAll();
-}
+function buyProficiency() { buyLevels(proficiencyCost, () => state.proficiency++); }
+function buyFlow() { buyLevels(flowCost, () => state.flow++); }
 function buyResearch(r) {
   const L = state.research[r.id] | 0;
   if (L >= researchMax(r)) return;
@@ -552,16 +650,16 @@ function refreshAll() {
 }
 
 /* ---------- tabs ---------- */
+function selectTab(which) {
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === which));
+  document.querySelectorAll(".tab-content").forEach(c => c.classList.toggle("hidden", c.id !== "tab-" + which));
+  if (which === "research") renderResearch();
+  if (which === "herbalism") renderProfession("herb");
+  if (which === "mining") renderProfession("ore");
+  if (which === "combat") renderCombat();
+}
 document.querySelectorAll(".tab").forEach(tab => {
-  tab.addEventListener("click", () => {
-    if (tab.disabled) return;
-    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
-    tab.classList.add("active");
-    const which = tab.dataset.tab;
-    $("#tab-upgrades").classList.toggle("hidden", which !== "upgrades");
-    $("#tab-research").classList.toggle("hidden", which !== "research");
-    if (which === "research") renderResearch();
-  });
+  tab.addEventListener("click", () => { if (!tab.disabled) selectTab(tab.dataset.tab); });
 });
 
 /* ---------- save / load ---------- */
@@ -583,11 +681,16 @@ function load() {
     const defaults = { settings: { ...state.settings }, dev: { ...state.dev } };
     Object.assign(state, s);
     state.research = s.research || {};
+    state.talents = s.talents || {};
     // merge nested objects so older saves still get new fields
     state.settings = { ...defaults.settings, ...(s.settings || {}) };
     state.dev = { ...defaults.dev, ...(s.dev || {}) };
-    if (typeof state.playTimeMs !== "number") state.playTimeMs = 0;
-    if (typeof state.rebirths !== "number") state.rebirths = 0;
+    // numeric/back-compat defaults for fields added later
+    const num = (k) => { if (typeof state[k] !== "number") state[k] = 0; };
+    ["playTimeMs", "rebirths", "totalRunes", "totalTaps", "vr", "vrEarned",
+     "herbs", "herbProgress", "ores", "oreProgress", "survivalRunes", "swordLevel"].forEach(num);
+    if (typeof state.buyMode !== "number") state.buyMode = 1;
+    if (typeof state.monsterLevel !== "number" || state.monsterLevel < 1) state.monsterLevel = 1;
     return true;
   } catch (e) { return false; }
 }
@@ -639,11 +742,14 @@ function loop(now) {
   accrueIdle();
   updateTop();
   checkResearchUnlock();
+  checkForcedRebirth();
   // keep card states (affordability/unlocks) live during idle income
   panelAccum += dt;
   if (panelAccum >= 0.5) {
     panelAccum = 0;
     renderUpgrades();
+    renderBuyMode();
+    updateTabsVisibility();
     if (!$("#research-tab").disabled) renderResearch();
     if (!$("#modal-overlay").classList.contains("hidden") && !$("#modal-stats").classList.contains("hidden")) renderStats();
   }
@@ -837,7 +943,10 @@ function openModal(name) {
   if (m) m.classList.remove("hidden");
   if (name === "stats") renderStats();
 }
-function closeModal() { $("#modal-overlay").classList.add("hidden"); }
+function closeModal() {
+  if (rebirthForced) return; // a forced rebirth can't be dismissed
+  $("#modal-overlay").classList.add("hidden");
+}
 
 function initModals() {
   document.querySelectorAll(".footer-btn[data-modal]").forEach(btn =>
@@ -873,10 +982,20 @@ function renderStats() {
   const row = (k, v) => rows.push(`<div class="stat-line"><span class="k">${k}</span><span class="v">${v}</span></div>`);
 
   row("Time played", fmtDuration(state.playTimeMs));
-  row("Runes tapped", fmt(state.lifetimeTaps));
-  row("Runes gathered (all time)", fmt(state.lifetimeRunes));
+  row("Runes tapped (all time)", fmt(state.totalTaps));
+  row("Runes gathered (all time)", fmt(state.totalRunes));
+  row("Runes gathered (this life)", fmt(state.lifetimeRunes));
   row("Comprehension", fmt(state.comprehension));
-  if (state.rebirthUnlocked || state.rebirths > 0) row("Rebirths", fmt(state.rebirths));
+  if (state.rebirthUnlocked || state.rebirths > 0) {
+    row("Rebirths", fmt(state.rebirths));
+    row("Void Runes", fmt(state.vr) + " (earned " + fmt(state.vrEarned) + ")");
+  }
+  if (hasProfession("herbalism")) row("Herbs", fmt(state.herbs));
+  if (hasProfession("mining")) row("Ore", fmt(state.ores));
+  if (hasProfession("combat")) {
+    row("Survival Runes", fmt(state.survivalRunes));
+    row("Monsters slain", fmt(state.monsterLevel - 1));
+  }
 
   // multiplier (only meaningful once a multiplier has been researched / earned)
   if (d.allMultTotal > 1.0001 || d.tapMultTotal > 1.0001) {
@@ -898,6 +1017,14 @@ function renderStats() {
    Patch Notes  — keep newest at the top; add an entry with every patch.
    ===================================================================== */
 const PATCH_NOTES = [
+  {
+    v: "2.0.0", when: "2026-06-12", notes: [
+      "Rebirth: at 4 Comprehension you enter the Void for the first time. Rebirthing wipes your life but grants Void Runes (1 per power-of-ten of runes gathered, from 1M up).",
+      "Talent tree: spend Void Runes on permanent talents — tap power, crit, idle speed, Void Attunement, Head Start, and more.",
+      "New professions, unlocked by talents: Herbalism and Mining (tap to gather, 10 taps each), and Combat (slay monsters for Survival Runes).",
+      "Upgrades: added Buy 5 (unlocks at 1M total runes) and Buy All (unlocks at 1B total runes).",
+    ],
+  },
   {
     v: "1.5.1", when: "2026-06-10", notes: [
       "Fixed the “/ tap” display showing a stale 0.33 — a beginning tap is worth 1 rune.",
@@ -1044,6 +1171,239 @@ function initDevPanel() {
   });
 }
 
+/* =====================================================================
+   Buy modes (Buy 5 / Buy All) in the Upgrades tab
+   ===================================================================== */
+const BUY5_UNLOCK = 1e6;     // total runes to unlock "Buy 5"
+const BUYALL_UNLOCK = 1e9;   // total runes to unlock "Buy All"
+function initBuyMode() {
+  document.querySelectorAll(".buymode-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      if (btn.disabled) return;
+      const v = btn.dataset.buy;
+      state.buyMode = v === "all" ? Infinity : parseInt(v, 10);
+      renderBuyMode();
+      refreshAll();
+    });
+  });
+  renderBuyMode();
+}
+function renderBuyMode() {
+  const b5 = $("#buy5"), ball = $("#buyall");
+  const u5 = state.totalRunes >= BUY5_UNLOCK, uall = state.totalRunes >= BUYALL_UNLOCK;
+  b5.disabled = !u5; ball.disabled = !uall;
+  b5.title = u5 ? "" : `Unlocks at ${fmt(BUY5_UNLOCK)} total runes`;
+  ball.title = uall ? "" : `Unlocks at ${fmt(BUYALL_UNLOCK)} total runes`;
+  if (state.buyMode === 5 && !u5) state.buyMode = 1;
+  if (state.buyMode === Infinity && !uall) state.buyMode = 1;
+  document.querySelectorAll(".buymode-btn").forEach(btn => {
+    const v = btn.dataset.buy === "all" ? Infinity : parseInt(btn.dataset.buy, 10);
+    btn.classList.toggle("active", v === state.buyMode);
+  });
+}
+
+/* =====================================================================
+   Rebirth + Void Runes + Talent tree
+   ===================================================================== */
+let rebirthForced = false;
+
+function pendingVrGain() {
+  let g = vrFromRunes(state.lifetimeRunes) + talentLevel("greater_sacrifice");
+  if (state.rebirths === 0) g = Math.max(g, 5); // bootstrap the first (forced) rebirth
+  return g;
+}
+
+function performRebirth() {
+  const gain = pendingVrGain();
+  state.vr += gain;
+  state.vrEarned += gain;
+  state.rebirths++;
+  state.rebirthUnlocked = true;
+  state.forcedRebirthDone = true;
+
+  // wipe the life clean (keep VR, talents, professions, stats, settings)
+  state.lifetimeRunes = 0;
+  state.lifetimeTaps = 0;
+  state.comprehension = 0;
+  state.proficiency = 0;
+  state.flow = 0;
+  state.research = {};
+  state.dev = { tapMult: 1, rpsBonus: 0 };
+  // Head Start talent grants starting runes (not counted toward this life's gather)
+  const hs = talentLevel("head_start");
+  state.runes = hs > 0 ? Math.pow(10, hs) : 0;
+
+  dirty = true;
+  rebirthForced = false;
+  Sound.research();
+  recompute();
+  renderRebirth();
+  refreshAll();
+  updateTabsVisibility();
+}
+
+function openRebirth(forced) {
+  rebirthForced = !!forced;
+  renderRebirth();
+  openModal("rebirth");
+}
+
+function renderRebirth() {
+  $("#vr-balance").textContent = fmt(state.vr);
+  const gain = pendingVrGain();
+  const doBtn = $("#do-rebirth");
+  doBtn.textContent = `Rebirth — gain ${fmt(gain)} Void Rune${gain === 1 ? "" : "s"}`;
+  $("#vr-gain-line").innerHTML =
+    `This life gathered <b>${fmt(state.lifetimeRunes)}</b> runes → <b>${fmt(gain)}</b> VR`;
+  $("#rebirth-warning").textContent = rebirthForced
+    ? "You have glimpsed the Void. You must Rebirth to continue — all progress this life is consumed, but your Void Runes remain."
+    : "Rebirthing wipes this life (runes, upgrades, research, Comprehension). You keep Void Runes, talents and professions.";
+  $("#rebirth-close").classList.toggle("hidden", rebirthForced);
+  $("#begin-anew").classList.toggle("hidden", rebirthForced);
+  renderTalents();
+}
+
+function renderTalents() {
+  const list = $("#talent-list");
+  list.innerHTML = "";
+  for (const t of TALENTS) {
+    const L = talentLevel(t.id);
+    const maxed = L >= talentMax(t);
+    const cost = talentCost(t);
+    const affordable = !maxed && state.vr >= cost;
+    const btn = document.createElement("button");
+    btn.className = "card talent" + (affordable ? " affordable" : "") + (maxed ? " maxed" : "");
+    btn.disabled = !affordable;
+    const lvlText = t.max === 1 ? (L > 0 ? "Unlocked" : "") : `Lv ${L}${isFinite(talentMax(t)) ? "/" + talentMax(t) : ""}`;
+    const costText = maxed ? "MAX" : `◆ ${fmt(cost)} VR`;
+    btn.innerHTML =
+      `<div class="card-head"><span class="card-name">${t.name}${t.unlock ? '<span class="tag mult">profession</span>' : ""}</span>` +
+      `<span class="card-level">${lvlText}</span></div>` +
+      `<div class="card-desc">${t.desc}</div>` +
+      `<span class="card-cost ${maxed ? "lock" : affordable ? "ok" : "no"}">${costText}</span>`;
+    if (affordable) btn.addEventListener("click", () => buyTalent(t));
+    list.appendChild(btn);
+  }
+}
+
+function buyTalent(t) {
+  const L = talentLevel(t.id);
+  if (L >= talentMax(t)) return;
+  const cost = talentCost(t);
+  if (state.vr < cost) return;
+  state.vr -= cost;
+  state.talents[t.id] = L + 1;
+  dirty = true;
+  Sound.buy();
+  recompute();
+  renderRebirth();
+  updateTabsVisibility();
+  refreshAll();
+}
+
+function initRebirthUI() {
+  $("#do-rebirth").addEventListener("click", performRebirth);
+  $("#begin-anew").addEventListener("click", () => { rebirthForced = false; closeModal(); });
+  $("#rebirth-btn").addEventListener("click", () => openRebirth(false));
+}
+
+function checkForcedRebirth() {
+  if (pendingForcedRebirth && !state.forcedRebirthDone) {
+    pendingForcedRebirth = false;
+    openRebirth(true);
+  }
+}
+
+function updateTabsVisibility() {
+  ["herbalism", "mining", "combat"].forEach(name => {
+    const tab = document.querySelector('.tab[data-tab="' + name + '"]');
+    if (tab) tab.classList.toggle("hidden", !hasProfession(name));
+  });
+  const rb = $("#rebirth-btn");
+  if (rb) rb.classList.toggle("hidden", !state.rebirthUnlocked);
+}
+
+/* =====================================================================
+   Professions: Herbalism & Mining (10 taps per resource)
+   ===================================================================== */
+function gatherProfession(kind) {
+  const progKey = kind === "herb" ? "herbProgress" : "oreProgress";
+  const countKey = kind === "herb" ? "herbs" : "ores";
+  state[progKey] = (state[progKey] | 0) + 1;
+  if (state[progKey] >= COMBAT.TAPS_PER_RESOURCE) {
+    state[progKey] = 0;
+    state[countKey] = (state[countKey] | 0) + 1;
+    dirty = true; // resource bonuses feed recompute
+  }
+  Sound.tap(false);
+  renderProfession(kind);
+}
+function renderProfession(kind) {
+  const isHerb = kind === "herb";
+  const count = isHerb ? state.herbs : state.ores;
+  const prog = isHerb ? state.herbProgress : state.oreProgress;
+  $(isHerb ? "#herb-count" : "#ore-count").textContent = fmt(count);
+  const bar = $(isHerb ? "#herb-bar" : "#ore-bar");
+  bar.style.width = (100 * prog / COMBAT.TAPS_PER_RESOURCE) + "%";
+}
+
+/* =====================================================================
+   Combat: tap a monster, kill it for Survival Runes
+   ===================================================================== */
+function ensureMonster() {
+  if (state.monsterHp == null || state.monsterHp <= 0) {
+    state.monsterHp = COMBAT.monsterHp(state.monsterLevel);
+  }
+}
+function attackMonster() {
+  ensureMonster();
+  state.monsterHp -= COMBAT.attackPower();
+  if (state.monsterHp <= 0) {
+    const sr = COMBAT.srPerKill(state.monsterLevel);
+    state.survivalRunes += sr;
+    state.monsterLevel++;
+    state.monsterHp = COMBAT.monsterHp(state.monsterLevel);
+    Sound.buy();
+  } else {
+    Sound.tap(false);
+  }
+  renderCombat();
+}
+function buySword() {
+  const cost = COMBAT.swordCost(state.swordLevel);
+  if (state.survivalRunes < cost) return;
+  state.survivalRunes -= cost;
+  state.swordLevel++;
+  Sound.research();
+  renderCombat();
+}
+function renderCombat() {
+  ensureMonster();
+  const maxHp = COMBAT.monsterHp(state.monsterLevel);
+  $("#monster-level").textContent = fmt(state.monsterLevel);
+  $("#monster-hp").textContent = fmt(Math.max(0, Math.ceil(state.monsterHp)));
+  $("#monster-hp-max").textContent = fmt(maxHp);
+  $("#monster-hp-bar").style.width = Math.max(0, 100 * state.monsterHp / maxHp) + "%";
+  $("#survival-runes").textContent = fmt(state.survivalRunes);
+  $("#attack-power").textContent = fmt(COMBAT.attackPower());
+  const cost = COMBAT.swordCost(state.swordLevel);
+  const sword = $("#sword-upgrade");
+  const can = state.survivalRunes >= cost;
+  sword.classList.toggle("affordable", can);
+  sword.disabled = !can;
+  sword.innerHTML =
+    `<div class="card-head"><span class="card-name">Sharpen Sword</span><span class="card-level">Lv ${state.swordLevel}</span></div>` +
+    `<div class="card-desc">+2 attack power.</div>` +
+    `<span class="card-cost ${can ? "ok" : "no"}">⚔ ${fmt(cost)} Survival Runes</span>`;
+}
+
+function initProfessionsUI() {
+  $("#herb-target").addEventListener("pointerdown", (e) => { e.preventDefault(); gatherProfession("herb"); });
+  $("#ore-target").addEventListener("pointerdown", (e) => { e.preventDefault(); gatherProfession("ore"); });
+  $("#monster-target").addEventListener("pointerdown", (e) => { e.preventDefault(); attackMonster(); });
+  $("#sword-upgrade").addEventListener("click", buySword);
+}
+
 /* ---------- boot ---------- */
 function init() {
   load();
@@ -1067,7 +1427,14 @@ function init() {
   initSettingsUI();
   initModals();
   initDevPanel();
+  initBuyMode();
+  initRebirthUI();
+  initProfessionsUI();
+  updateTabsVisibility();
   renderPatchNotes();
+
+  // if a save already passed 4 Comprehension before the forced rebirth, force it now
+  if (state.comprehension >= 4 && !state.forcedRebirthDone) pendingForcedRebirth = true;
 
   setInterval(save, 10000);
   // keep gathering idle runes in the background (rAF is paused when hidden)
