@@ -782,6 +782,12 @@ function buyResearch(r) {
 function updateTop() {
   if (dirty) recompute();
   $("#rune-count").textContent = fmt(state.runes);
+  // combat gold, shown in the top bar once Combat is unlocked
+  const goldStat = $("#topbar-gold");
+  if (hasProfession("combat")) {
+    goldStat.classList.remove("hidden");
+    $("#topbar-gold-count").textContent = fmt(Math.floor(state.gold));
+  } else goldStat.classList.add("hidden");
   $("#comprehension-count").textContent = fmt(state.comprehension);
   $("#per-tap").textContent = fmt(d.tapValue);
   $("#per-sec").textContent = fmt(d.idlePerSec);
@@ -1381,6 +1387,11 @@ function renderStats() {
    Patch Notes  — keep newest at the top; add an entry with every patch.
    ===================================================================== */
 const PATCH_NOTES = [
+  {
+    v: "2.10.4", when: "2026-06-12", notes: [
+      "Combat Gold is now shown in the top bar next to Runes once Combat is unlocked.",
+    ],
+  },
   {
     v: "2.10.3", when: "2026-06-12", notes: [
       "Gold Ore now also grants ore (x50), on top of its 100 combat gold.",

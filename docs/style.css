@@ -643,3 +643,12 @@ body {
 .rk.sq   { color: #ff5e5e; }
 .rk.circ { color: #5b9bff; }
 .rk.rect { color: #ffe04d; letter-spacing: -1px; }
+
+/* ===== Top-bar combat gold ===== */
+.gold-count {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--gold);
+  text-shadow: 0 0 10px rgba(255,214,107,0.5);
+  line-height: 1;
+}
