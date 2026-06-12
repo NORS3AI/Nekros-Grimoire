@@ -1388,6 +1388,11 @@ function renderStats() {
    ===================================================================== */
 const PATCH_NOTES = [
   {
+    v: "2.11.2", when: "2026-06-12", notes: [
+      "Herbalism/Mining now show yield per gather (not per tap), so a yield upgrade like Rich Veins (+0.2) shows the exact amount it adds.",
+    ],
+  },
+  {
     v: "2.11.1", when: "2026-06-12", notes: [
       "Dev panel: added Unlock Herbalism / Mining / Combat buttons.",
     ],
@@ -1966,8 +1971,8 @@ function renderProfession(kind) {
   const taps = kind === "ore" ? oreTapsNeeded() : profTapsNeeded(kind);
   $(pre + "-count").textContent = fmt(Math.floor(state[p.res]));
   $(pre + "-bar").style.width = (100 * (state[p.prog] | 0) / taps) + "%";
-  // effective amount earned per individual tap = yield / taps-needed
-  $(pre + "-pertap").textContent = fmt(Math.round((profYield(kind) / profTapsNeeded(kind)) * 100) / 100);
+  // yield per completed gather (what Rich Veins / Forager's Yield add to directly)
+  $(pre + "-pertap").textContent = fmt(Math.round(profYield(kind) * 100) / 100);
   $(pre + "-auto").textContent = fmt(profAutoPerSec(kind));
   if (kind === "ore") {
     const ore = currentOre();
