@@ -188,8 +188,9 @@ const CBT = {
   isBoss:    (lvl) => lvl % 10 === 0,                             // lvl = within-rank level (1-100)
   // each rank restarts the climb (level 1) but with a higher ceiling via RANK_MULT^rank
   monsterHp: (lvl, rank) => Math.ceil((lvl % 10 === 0 ? 45 : 12) * Math.pow(1.13, lvl - 1) * Math.pow(RANK_MULT, rank)),
-  // ~30 gold over the first 10 levels (boss ~10); grows with HP so pacing holds
-  goldDrop:  (lvl, rank) => Math.ceil(Math.pow(1.13, lvl - 1) * Math.pow(RANK_MULT, rank) * (lvl % 10 === 0 ? 3.5 : 1)),
+  // ~30 gold over the first 10 levels (boss ~10). Grows gently (1.08/level) so
+  // deep levels don't drown you in gold — Gold Ore mining matters more then.
+  goldDrop:  (lvl, rank) => Math.ceil(1.5 * Math.pow(1.08, lvl - 1) * Math.pow(RANK_MULT, rank) * (lvl % 10 === 0 ? 3.5 : 1)),
   monsterAtk:(lvl, rank) => Math.ceil(2 * Math.pow(1.08, lvl - 1) * Math.pow(2, rank)),   // damage / sec to player
   baseTap: 1,
 };
@@ -216,18 +217,27 @@ function depthLabel(d) {
 }
 function magicReq(level) { return 25 * Math.pow(2, level); } // 25, 50, 100, 200, ...
 
-/* Forge upgrades (bought with Gold). minRank gates the new tiers. */
+/* Forge upgrades (bought with Gold). minRank gates the new tiers.
+   fx percentages stack additively per level (e.g. tapPct, dpsPct, allPct...). */
 const COMBAT_UP = [
   { id:"sharpen",  name:"Sharpen Blade",   base:10,  growth:1.16, desc:"+2 tap damage." },
   { id:"familiar", name:"Summon Familiar", base:60,  growth:1.18, desc:"+3.33 damage per second (auto-attack)." },
   { id:"whetstone",name:"Whetstone",       base:250, growth:1.26, special:"crit", desc:"+1% crit chance and +0.5 crit damage." },
   { id:"greed",    name:"Greed",           base:120, growth:1.22, special:"gold", desc:"+10% gold from kills." },
+  { id:"fury",     name:"Fury",            base:400, growth:1.20, fx:{tapPct:8},  desc:"+8% tap damage." },
+  { id:"wardrums", name:"War Drums",       base:400, growth:1.20, fx:{dpsPct:8},  desc:"+8% auto damage." },
+  { id:"onslaught",name:"Onslaught",       base:5000,growth:1.23, fx:{allPct:5},  desc:"+5% ALL damage." },
+  { id:"prospect", name:"Prospector",      base:1500,growth:1.21, fx:{goldPct:8}, desc:"+8% gold from kills." },
   // ★ tier (rank >= 1): the monster fights back
   { id:"agility",  name:"Agility",   base:200, growth:1.20, minRank:1, desc:"+0.1% dodge chance per level." },
   { id:"strength", name:"Strength",  base:200, growth:1.20, minRank:1, desc:"+0.3% to all your damage per level." },
   { id:"vitality", name:"Vitality",  base:200, growth:1.20, minRank:1, desc:"+max HP and regen." },
+  { id:"toughness",name:"Toughness", base:1500,growth:1.22, minRank:1, fx:{hpPct:10}, desc:"+10% max HP." },
+  { id:"reflexes", name:"Reflexes",  base:1500,growth:1.25, minRank:1, fx:{dodgeFlat:0.5}, desc:"+0.5% dodge chance." },
+  { id:"recovery", name:"Recovery",  base:1500,growth:1.22, minRank:1, fx:{regenPct:20}, desc:"+20% HP regen." },
   // ▲ tier (rank >= 6): magic
-  { id:"intellect",name:"Intellect", base:5000, growth:1.22, minRank:6, desc:"+1 magic (fireball) damage per level." },
+  { id:"intellect",name:"Intellect", base:5000,  growth:1.22, minRank:6, desc:"+1 magic (fireball) damage per level." },
+  { id:"sorcery",  name:"Sorcery",   base:50000, growth:1.24, minRank:6, fx:{magicPct:12}, desc:"+12% magic damage." },
 ];
 /* Tactics research (bought with Gold). unlock = depth; minRank gates new ones. */
 const COMBAT_RESEARCH = [
@@ -238,14 +248,19 @@ const COMBAT_RESEARCH = [
   { id:"fortune",  name:"Fortune",     unlock:28, cost:1e6,   fx:{goldMult:3}, desc:"x3 gold." },
   { id:"berserk",  name:"Berserk",     unlock:38, cost:1e7,   fx:{dmgMult:3}, desc:"x3 tap damage." },
   { id:"legion",   name:"Legion",      unlock:48, cost:1e8,   fx:{dpsMult:3}, desc:"x3 auto damage." },
+  { id:"warband",  name:"Warband",     unlock:55, cost:5e8,   fx:{dpsMult:2, dmgMult:2}, desc:"x2 tap & x2 auto damage." },
   { id:"godslayer",name:"Godslayer",   unlock:65, cost:5e9,   fx:{allMult:3}, desc:"x3 ALL damage." },
+  { id:"cataclysm",name:"Cataclysm",   unlock:80, cost:1e12,  fx:{allMult:4}, desc:"x4 ALL damage." },
   // ★ tier
   { id:"evasion",  name:"Evasion Drill", minRank:1, unlock:101, cost:5e5,  fx:{dodgeMult:2}, desc:"Double your dodge chance." },
   { id:"ironhide", name:"Iron Hide",     minRank:1, unlock:101, cost:2e6,  fx:{atkReduce:40}, desc:"Monsters hit you 40% softer." },
+  { id:"warcry",   name:"War Cry",       minRank:1, unlock:120, cost:2e7,  fx:{allMult:2}, desc:"x2 ALL damage." },
   { id:"titan",    name:"Titan's Vigor", minRank:3, unlock:301, cost:5e8,  fx:{allMult:3}, desc:"x3 ALL damage." },
+  { id:"juggernaut",name:"Juggernaut",   minRank:3, unlock:320, cost:5e9,  fx:{hpMult:2, allMult:2}, desc:"x2 max HP & x2 ALL damage." },
   // ▲ tier
   { id:"spellpower",name:"Spell Mastery", minRank:6, unlock:601, cost:1e10, fx:{magicMult:3}, desc:"x3 magic damage." },
   { id:"archmage",  name:"Archmage",      minRank:6, unlock:601, cost:1e11, fx:{magicMult:3, allMult:2}, desc:"x3 magic & x2 all damage." },
+  { id:"ascendant", name:"Ascendant",     minRank:6, unlock:650, cost:1e14, fx:{magicMult:4, allMult:4}, desc:"x4 magic & x4 ALL damage." },
 ];
 /* Retreat talents (bought with Survival Runes; persist through Retreat) */
 const COMBAT_TALENTS = [
@@ -284,29 +299,48 @@ const PROFS = {
     name: "Herbalism", emoji: "🌿", res: "herbs", total: "herbsTotal", prog: "herbProgress", up: "herbUp",
     bonusKind: "all", bonusBase: 0.1, bonusPer: 0.05, bonusLabel: "all rune gain",
     upgrades: [
-      { id: "yield",   name: "Forager's Yield", base: 8,  growth: 1.20,          desc: "+1 herb per gather." },
-      { id: "auto",    name: "Wild Growth",     base: 25, growth: 1.22,          desc: "+0.2 herbs per second." },
-      { id: "speed",   name: "Quick Hands",     base: 40, growth: 1.55, max: 9,  desc: "−1 tap needed per herb (min 1)." },
-      { id: "potency", name: "Potency",         base: 30, growth: 1.28,          desc: "+0.05% all rune gain per herb gathered (lifetime)." },
+      { id: "yield",     name: "Forager's Yield", base: 8,    growth: 1.20,         fx:{yieldAdd:1},    desc: "+1 herb per gather." },
+      { id: "auto",      name: "Wild Growth",     base: 25,   growth: 1.22,         fx:{autoAdd:0.2},   desc: "+0.2 herbs per second." },
+      { id: "speed",     name: "Quick Hands",     base: 40,   growth: 1.55, max: 9, fx:{speed:1},       desc: "−1 tap needed per herb (min 1)." },
+      { id: "potency",   name: "Potency",         base: 30,   growth: 1.28,         fx:{potency:0.05},  desc: "+0.05% all rune gain per herb gathered." },
+      { id: "harvest",   name: "Bountiful Harvest", base: 400, growth: 1.27,        fx:{yieldAdd:5},    desc: "+5 herbs per gather." },
+      { id: "greenhouse",name: "Greenhouse",      base: 600,  growth: 1.30,         fx:{autoAdd:2},     desc: "+2 herbs per second." },
+      { id: "master",    name: "Master Forager",  base: 5000, growth: 1.45, max: 12,fx:{yieldMult:1.5}, desc: "x1.5 herbs per gather." },
+      { id: "distill",   name: "Distillation",    base: 5000, growth: 1.35,         fx:{potency:0.2},   desc: "+0.2% all rune gain per herb gathered." },
     ],
   },
   ore: {
     name: "Mining", emoji: "🪨", res: "ores", total: "oresTotal", prog: "oreProgress", up: "oreUp",
     bonusKind: "tap", bonusBase: 0.2, bonusPer: 0.1, bonusLabel: "runes per tap",
     upgrades: [
-      { id: "yield",   name: "Rich Veins",  base: 8,  growth: 1.20,          desc: "+1 ore per mine." },
-      { id: "auto",    name: "Auto-Drill",  base: 25, growth: 1.22,          desc: "+0.2 ore per second." },
-      { id: "speed",   name: "Heavy Pick",  base: 40, growth: 1.55, max: 9,  desc: "−1 tap needed per ore (min 1)." },
-      { id: "potency", name: "Refinement",  base: 30, growth: 1.28,          desc: "+0.1% runes per tap per ore mined (lifetime)." },
+      { id: "yield",     name: "Rich Veins",  base: 8,    growth: 1.20,         fx:{yieldAdd:1},    desc: "+1 ore per mine." },
+      { id: "auto",      name: "Auto-Drill",  base: 25,   growth: 1.22,         fx:{autoAdd:0.2},   desc: "+0.2 ore per second." },
+      { id: "speed",     name: "Heavy Pick",  base: 40,   growth: 1.55, max: 9, fx:{speed:1},       desc: "−1 tap needed per ore (min 1)." },
+      { id: "potency",   name: "Refinement",  base: 30,   growth: 1.28,         fx:{potency:0.1},   desc: "+0.1% runes per tap per ore mined." },
+      { id: "motherlode",name: "Motherlode",  base: 400,  growth: 1.27,         fx:{yieldAdd:5},    desc: "+5 ore per mine." },
+      { id: "powerdrill",name: "Power Drill", base: 600,  growth: 1.30,         fx:{autoAdd:2},     desc: "+2 ore per second." },
+      { id: "foreman",   name: "Foreman",     base: 5000, growth: 1.45, max: 12,fx:{yieldMult:1.5}, desc: "x1.5 ore per mine." },
+      { id: "smelting",  name: "Smelting",    base: 5000, growth: 1.35,         fx:{potency:0.2},   desc: "+0.2% runes per tap per ore mined." },
     ],
   },
 };
 function profUpLevel(kind, id) { return state[PROFS[kind].up][id] | 0; }
 function profUpCost(kind, u) { return Math.ceil(u.base * Math.pow(u.growth, profUpLevel(kind, u.id))); }
-function profTapsNeeded(kind) { return Math.max(1, TAPS_PER_RESOURCE - profUpLevel(kind, "speed")); }
-function profYield(kind) { return 1 + profUpLevel(kind, "yield"); }
-function profAutoPerSec(kind) { return 0.2 * profUpLevel(kind, "auto"); }
-function profBonusPer(kind) { const p = PROFS[kind]; return p.bonusBase + p.bonusPer * profUpLevel(kind, "potency"); }
+// derive a profession's stats by summing/multiplying its upgrades' fx
+function profSum(kind, key) {
+  let s = 0;
+  for (const u of PROFS[kind].upgrades) if (u.fx && u.fx[key]) s += u.fx[key] * profUpLevel(kind, u.id);
+  return s;
+}
+function profMult(kind, key) {
+  let m = 1;
+  for (const u of PROFS[kind].upgrades) if (u.fx && u.fx[key]) m *= Math.pow(u.fx[key], profUpLevel(kind, u.id));
+  return m;
+}
+function profTapsNeeded(kind) { return Math.max(1, TAPS_PER_RESOURCE - profSum(kind, "speed")); }
+function profYield(kind) { return (1 + profSum(kind, "yieldAdd")) * profMult(kind, "yieldMult"); }
+function profAutoPerSec(kind) { return profSum(kind, "autoAdd") * profMult(kind, "autoMult"); }
+function profBonusPer(kind) { return PROFS[kind].bonusBase + profSum(kind, "potency"); }
 
 /* ---------- game state ---------- */
 let state = {
@@ -398,7 +432,7 @@ function recomputeCombat() {
   let critMult = lv("whetstone") > 0 ? 2 + 0.5 * lv("whetstone") : 0;
   let goldPct = 10 * lv("greed");
 
-  let dmgMult = 1, dpsMult = 1, allMult = 1, goldMult = 1, magicMult = 1, dodgeMult = 1, atkReduce = 0;
+  let dmgMult = 1, dpsMult = 1, allMult = 1, goldMult = 1, magicMult = 1, dodgeMult = 1, atkReduce = 0, hpMult = 1;
   for (const r of COMBAT_RESEARCH) {
     const L = state.combatResearch[r.id] | 0; if (!L) continue;
     if (r.fx.dmgMult)   dmgMult   *= Math.pow(r.fx.dmgMult, L);
@@ -407,14 +441,28 @@ function recomputeCombat() {
     if (r.fx.goldMult)  goldMult  *= Math.pow(r.fx.goldMult, L);
     if (r.fx.magicMult) magicMult *= Math.pow(r.fx.magicMult, L);
     if (r.fx.dodgeMult) dodgeMult *= Math.pow(r.fx.dodgeMult, L);
+    if (r.fx.hpMult)    hpMult    *= Math.pow(r.fx.hpMult, L);
     if (r.fx.atkReduce) atkReduce = 1 - (1 - atkReduce) * Math.pow(1 - r.fx.atkReduce / 100, L);
   }
-  let dmgPct = 0, dpsPct = 0, talGoldPct = 0;
+  // additive-percentage effects (Forge fx + talents)
+  let tapPct = 0, dpsPct = 0, allPct = 0, goldPctAdd = 0, hpPct = 0, dodgeFlat = 0, regenPct = 0, magicPct = 0;
+  for (const u of COMBAT_UP) {
+    const L = lv(u.id); if (!L || !u.fx) continue;
+    if (u.fx.tapPct)    tapPct    += u.fx.tapPct * L;
+    if (u.fx.dpsPct)    dpsPct    += u.fx.dpsPct * L;
+    if (u.fx.allPct)    allPct    += u.fx.allPct * L;
+    if (u.fx.goldPct)   goldPctAdd += u.fx.goldPct * L;
+    if (u.fx.hpPct)     hpPct     += u.fx.hpPct * L;
+    if (u.fx.dodgeFlat) dodgeFlat += u.fx.dodgeFlat * L;   // in %
+    if (u.fx.regenPct)  regenPct  += u.fx.regenPct * L;
+    if (u.fx.magicPct)  magicPct  += u.fx.magicPct * L;
+  }
+  let talDmgPct = 0, talDpsPct = 0, talGoldPct = 0;
   for (const t of COMBAT_TALENTS) {
     const L = state.combatTalents[t.id] | 0; if (!L) continue;
     if (t.fx) {
-      if (t.fx.dmgPct)  dmgPct  += t.fx.dmgPct * L;
-      if (t.fx.dpsPct)  dpsPct  += t.fx.dpsPct * L;
+      if (t.fx.dmgPct)  talDmgPct  += t.fx.dmgPct * L;
+      if (t.fx.dpsPct)  talDpsPct  += t.fx.dpsPct * L;
       if (t.fx.goldPct) talGoldPct += t.fx.goldPct * L;
     }
     if (t.special === "crit") { critChance += 0.05 * L; critMult += 2 * L; }
@@ -426,16 +474,16 @@ function recomputeCombat() {
   // Survival Runes held: +10% combat damage each
   const srDmgMult = 1 + 0.10 * (state.survivalRunes | 0);
   const strengthMult = (1 + 0.003 * str) * srDmgMult;
-  cd.tapDmg = tapAdd * dmgMult * allMult * (1 + dmgPct / 100) * strengthMult;
-  cd.dps = autoAdd * dpsMult * allMult * (1 + dpsPct / 100) * strengthMult;
+  cd.tapDmg = tapAdd * dmgMult * allMult * (1 + (talDmgPct + tapPct + allPct) / 100) * strengthMult;
+  cd.dps = autoAdd * dpsMult * allMult * (1 + (talDpsPct + dpsPct + allPct) / 100) * strengthMult;
   cd.critChance = Math.min(0.9, critChance);
   cd.critMult = critMult;
-  cd.goldMult = (1 + goldPct / 100) * goldMult * (1 + talGoldPct / 100);
+  cd.goldMult = (1 + (goldPct + goldPctAdd + talGoldPct) / 100) * goldMult;
 
-  cd.dodge = Math.min(0.9, (0.001 * agi) * dodgeMult);
-  cd.playerMaxHp = (60 + 40 * vit) * (1 + 0.5 * state.combatRank);
-  cd.regen = Math.max(1, (60 + 40 * vit) * 0.03 + 2 * vit);
-  cd.magicDamage = (2 + intel + (state.magicLevel | 0)) * magicMult * srDmgMult;   // +1 per magic level
+  cd.dodge = Math.min(0.9, (0.001 * agi + dodgeFlat / 100) * dodgeMult);
+  cd.playerMaxHp = (60 + 40 * vit) * (1 + 0.5 * state.combatRank) * (1 + hpPct / 100) * hpMult;
+  cd.regen = Math.max(1, (60 + 40 * vit) * 0.03 + 2 * vit) * (1 + regenPct / 100);
+  cd.magicDamage = (2 + intel + (state.magicLevel | 0)) * magicMult * (1 + magicPct / 100) * srDmgMult;
   cd.atkReduce = atkReduce;
   combatDirty = false;
 }
@@ -1309,6 +1357,13 @@ function renderStats() {
    ===================================================================== */
 const PATCH_NOTES = [
   {
+    v: "2.9.0", when: "2026-06-12", notes: [
+      "Forge and Tactics no longer wipe when you finish a 100-level run — they carry across ranks. Only Ascending (the combat reset, renamed from “Retreat”) wipes them.",
+      "Lots of new upgrades: Herbalism & Mining each gain Bountiful Harvest/Motherlode, Greenhouse/Power Drill, a x1.5 yield master upgrade, and a stronger potency tier. Forge adds Fury, War Drums, Onslaught, Prospector, Toughness, Reflexes, Recovery and Sorcery. Tactics adds Warband, Cataclysm, War Cry, Juggernaut and Ascendant.",
+      "Gold from deep levels (50+) is much lower now, so Gold Ore mining matters more as you climb.",
+    ],
+  },
+  {
     v: "2.8.0", when: "2026-06-12", notes: [
       "Mining now cycles through Copper, Iron and Silver Ore (each adds to your ore), then Gold Ore — which takes 3x the taps and grants 100 combat gold instead.",
       "A boss's 10-second timer now starts only once you begin attacking it, not before.",
@@ -1846,10 +1901,6 @@ function rankUp() {
   state.monsterLevel = 1;
   state.playerHp = null;       // refilled by ensurePlayer at the new max
   bossDeadline = 0;
-  // ascending wipes Forge & Tactics — you rebuild them each rank (Survival
-  // Runes, talents, rank and magic persist)
-  state.combatUp = {};
-  state.combatResearch = {};
   combatDirty = true;          // HP/regen scale with rank
 }
 function killMonster() {
@@ -2157,12 +2208,12 @@ function renderCombatTactics() {
 function renderCombatRetreat() {
   $("#combat-sr2").textContent = fmt(state.survivalRunes);
   const btn = $("#do-retreat");
-  btn.textContent = "Retreat — restart the climb";
+  btn.textContent = "Ascend — restart the climb";
   btn.disabled = state.combatRank === 0 && state.monsterLevel <= 1;
   const sr = state.survivalRunes | 0;
   $("#retreat-info").innerHTML = `Now at <b>${depthLabel(CBT.depth())}</b> (depth ${fmt(CBT.depth())}). Highest ever: <b>${depthLabel(state.combatBest)}</b>.<br>` +
     `Holding Survival Runes grants <b class="good-text">+${fmt(10 * sr)}% combat damage</b> and <b class="good-text">+${fmt(sr)}% rune gain</b>.<br>` +
-    `Survival Runes come from <b>bosses</b>. Retreat resets gold, rank, Forge & Tactics so you can re-farm bosses — you keep Survival Runes and talents.`;
+    `Survival Runes come from <b>bosses</b>. Ascending is the <b>only</b> thing that wipes your Forge &amp; Tactics — it resets gold and rank so you can re-farm bosses, while your Survival Runes and talents are kept.`;
   const list = $("#combat-talent-list");
   list.innerHTML = "";
   for (const t of COMBAT_TALENTS) {
