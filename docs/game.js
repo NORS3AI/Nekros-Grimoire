@@ -537,30 +537,49 @@ function onCellTap(i, ev) {
   if (dirty || lifetimeTapEnabled) recompute();
 
   let val = d.tapValue;
-  let crit = false;
-  if (d.critMult > 0 && Math.random() < d.critChance) { val *= d.critMult; crit = true; }
+  let crit = false, mega = 1;
+  if (d.critMult > 0 && Math.random() < d.critChance) {
+    val *= d.critMult; crit = true;
+    critStreak++;
+    // crit streaks build to a MEGA crit at every 10th consecutive crit
+    mega = megaCritMult(critStreak);
+    if (mega > 1) val *= mega;
+  } else {
+    critStreak = 0;
+  }
 
   // one tap = one rune, and the glowing rune jumps to a new random cell
   addRunes(val);
   state.lifetimeTaps++;
   state.totalTaps++;
-  spawnFloat(ev, val, crit);
+  spawnFloat(ev, val, crit, mega);
   Sound.tap(crit);
+  if (mega > 1) Sound.research(); // celebratory flourish on a mega crit
   rerollActive();
 
   updateTop();
   maybeRefreshPanels();
 }
 
-function spawnFloat(ev, val, crit) {
+/* crit-streak combo: the Nth consecutive crit becomes a mega crit */
+let critStreak = 0;
+function megaCritMult(streak) {
+  if (streak <= 0 || streak % 10 !== 0) return 1;
+  if (streak >= 30) return 50;
+  if (streak >= 20) return 25;
+  return 10; // streak === 10
+}
+
+function spawnFloat(ev, val, crit, mega) {
   const rect = floatLayer.getBoundingClientRect();
   const f = document.createElement("div");
-  f.className = "float-num" + (crit ? " crit" : "");
-  f.textContent = (crit ? "CRIT! +" : "+") + fmt(val);
+  const isMega = mega > 1;
+  f.className = "float-num" + (crit ? " crit" : "") + (isMega ? " mega" : "");
+  f.textContent = (isMega ? `MEGA CRIT x${mega}! +` : crit ? "CRIT! +" : "+") + fmt(val);
   f.style.left = (ev.clientX - rect.left) + "px";
   f.style.top = (ev.clientY - rect.top) + "px";
   floatLayer.appendChild(f);
-  setTimeout(() => f.remove(), 900);
+  setTimeout(() => f.remove(), isMega ? 1300 : 900);
 }
 
 /* ---------- purchases ----------
@@ -1162,6 +1181,11 @@ function renderStats() {
    Patch Notes  — keep newest at the top; add an entry with every patch.
    ===================================================================== */
 const PATCH_NOTES = [
+  {
+    v: "2.3.0", when: "2026-06-12", notes: [
+      "Crit streaks: land 10 crits in a row for a MEGA CRIT worth x10, 20 in a row for x25, and 30+ in a row for x50 (on top of your normal crit). One non-crit tap resets the streak.",
+    ],
+  },
   {
     v: "2.2.1", when: "2026-06-12", notes: [
       "Settings: added a separate “Mute sound effects” toggle (silences tapping/buying without muting the music).",
