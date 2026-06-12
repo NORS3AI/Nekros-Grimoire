@@ -54,9 +54,18 @@
     <div class="tabs">
       <button class="tab active" data-tab="upgrades">Upgrades</button>
       <button class="tab" data-tab="research" id="research-tab" disabled>Research 🔒</button>
+      <button class="tab hidden" data-tab="herbalism">Herbalism</button>
+      <button class="tab hidden" data-tab="mining">Mining</button>
+      <button class="tab hidden" data-tab="combat">Combat</button>
     </div>
 
     <div class="tab-content" id="tab-upgrades">
+      <div class="buy-modes" id="buy-modes">
+        <span class="buy-modes-label">Buy</span>
+        <button class="buymode-btn active" data-buy="1">×1</button>
+        <button class="buymode-btn" data-buy="5" id="buy5">Buy 5</button>
+        <button class="buymode-btn" data-buy="all" id="buyall">Buy All</button>
+      </div>
       <div id="upgrades-list" class="list"></div>
       <p class="empty-hint" id="upgrades-empty">Gather <b>10</b> runes to unlock your first upgrade…</p>
     </div>
@@ -67,11 +76,47 @@
       <div id="research-list" class="list"></div>
     </div>
 
+    <div class="tab-content hidden" id="tab-herbalism">
+      <div class="prof">
+        <div class="prof-target" id="herb-target">🌿</div>
+        <div class="prof-count"><span id="herb-count">0</span> herbs</div>
+        <div class="prof-progress"><div id="herb-bar" class="prof-bar"></div></div>
+        <p class="muted">Tap the herb to gather it — 10 taps per herb. Each herb: +0.1% all rune gain.</p>
+      </div>
+    </div>
+
+    <div class="tab-content hidden" id="tab-mining">
+      <div class="prof">
+        <div class="prof-target" id="ore-target">🪨</div>
+        <div class="prof-count"><span id="ore-count">0</span> ore</div>
+        <div class="prof-progress"><div id="ore-bar" class="prof-bar"></div></div>
+        <p class="muted">Tap the ore to mine it — 10 taps per ore. Each ore: +0.2% runes per tap.</p>
+      </div>
+    </div>
+
+    <div class="tab-content hidden" id="tab-combat">
+      <div class="combat">
+        <div class="monster" id="monster-target">
+          <div class="monster-emoji">👹</div>
+          <div class="monster-name">Lv <span id="monster-level">1</span> Fiend</div>
+          <div class="hp-bar"><div id="monster-hp-bar"></div></div>
+          <div class="hp-text"><span id="monster-hp">0</span> / <span id="monster-hp-max">0</span> HP</div>
+        </div>
+        <div class="combat-stats">
+          <span>⚔ Attack <b id="attack-power">1</b></span>
+          <span>🜂 <b id="survival-runes">0</b> Survival Runes</span>
+        </div>
+        <button class="card" id="sword-upgrade"></button>
+        <p class="muted">Tap the monster to strike it. Slain monsters drop Survival Runes.</p>
+      </div>
+    </div>
+
     <div class="panel-footer">
       <button class="footer-btn" data-modal="settings" title="Settings" aria-label="Settings">⚙</button>
       <button class="footer-btn" data-modal="stats" title="Stats" aria-label="Stats">📊</button>
       <button class="footer-btn" data-modal="patch" title="Patch Notes" aria-label="Patch Notes">📜</button>
       <button class="footer-btn" data-modal="dev" title="Developer" aria-label="Developer">🛠</button>
+      <button class="footer-btn hidden" id="rebirth-btn" title="Rebirth" aria-label="Rebirth">🌀</button>
       <button id="reset-btn" class="reset-btn">Reset</button>
       <span id="save-indicator" class="save-indicator"></span>
     </div>
@@ -170,6 +215,25 @@
             <div class="dev-btns" id="dev-comp"></div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- The Void: Rebirth + Talent tree -->
+    <div class="modal hidden" id="modal-rebirth">
+      <div class="modal-head">
+        <h2>The Void</h2>
+        <button class="modal-close hidden" data-close id="rebirth-close" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="void-summary">
+          <div class="vr-balance-line">Void Runes: <b id="vr-balance">0</b></div>
+          <div id="vr-gain-line" class="muted"></div>
+          <button class="rebirth-do" id="do-rebirth">Rebirth</button>
+        </div>
+        <p class="muted" id="rebirth-warning"></p>
+        <h3>Talents</h3>
+        <div id="talent-list" class="list"></div>
+        <button class="ghost-btn" id="begin-anew">Begin Anew</button>
       </div>
     </div>
 
