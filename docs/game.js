@@ -565,9 +565,11 @@ function onCellTap(i, ev) {
 let critStreak = 0;
 function megaCritMult(streak) {
   if (streak <= 0 || streak % 10 !== 0) return 1;
-  if (streak >= 30) return 50;
-  if (streak >= 20) return 25;
-  return 10; // streak === 10
+  if (streak <= 10) return 10;
+  if (streak <= 20) return 25;
+  if (streak <= 30) return 50;
+  const s = Math.min(streak, 500);                 // keeps climbing up to 500 taps
+  return Math.round((50 + (s - 30) * 450 / 470) / 5) * 5;
 }
 
 function spawnFloat(ev, val, crit, mega) {
@@ -1182,6 +1184,12 @@ function renderStats() {
    ===================================================================== */
 const PATCH_NOTES = [
   {
+    v: "2.3.1", when: "2026-06-12", notes: [
+      "Mega crits now keep climbing past x50 — all the way to x500 at a 500-crit streak.",
+      "Dev panel: tap multiplier and Comprehension now take a custom amount, plus new +1/+5/+10/custom adders for Void Runes, Herbs and Ore.",
+    ],
+  },
+  {
     v: "2.3.0", when: "2026-06-12", notes: [
       "Crit streaks: land 10 crits in a row for a MEGA CRIT worth x10, 20 in a row for x25, and 30+ in a row for x50 (on top of your normal crit). One non-crit tap resets the streak.",
     ],
@@ -1316,6 +1324,13 @@ function initDevPanel() {
     });
     tapWrap.appendChild(b);
   });
+  $("#dev-tapmult-set").addEventListener("click", () => {
+    const v = parseFloat($("#dev-tapmult-custom").value);
+    if (isFinite(v) && v > 0) {
+      state.dev.tapMult = v; dirty = true; refreshAll(); showTapCur();
+      tapWrap.querySelectorAll("button").forEach(x => x.classList.remove("on"));
+    }
+  });
   showTapCur();
 
   // bonus runes / second (presets add; custom sets exact)
@@ -1355,6 +1370,32 @@ function initDevPanel() {
     b.addEventListener("click", () => { state.comprehension += v; dirty = true; refreshAll(); });
     compWrap.appendChild(b);
   });
+  $("#dev-comp-add").addEventListener("click", () => {
+    const v = Math.floor(parseFloat($("#dev-comp-custom").value));
+    if (isFinite(v) && v > 0) { state.comprehension += v; dirty = true; refreshAll(); }
+  });
+
+  // generic "+1/+5/+10 and custom" adder for a resource
+  const devAdder = (btnsSel, customSel, addBtnSel, apply) => {
+    const wrap = $(btnsSel);
+    [1, 5, 10].forEach(v => {
+      const b = document.createElement("button");
+      b.textContent = "+" + v;
+      b.addEventListener("click", () => { apply(v); dirty = true; refreshAll(); });
+      wrap.appendChild(b);
+    });
+    $(addBtnSel).addEventListener("click", () => {
+      const v = parseFloat($(customSel).value);
+      if (isFinite(v) && v > 0) { apply(v); dirty = true; refreshAll(); }
+    });
+  };
+  // Void Runes
+  devAdder("#dev-vr", "#dev-vr-custom", "#dev-vr-add", (v) => {
+    state.vr += v; state.vrEarned += v; state.rebirthUnlocked = true; updateTabsVisibility();
+  });
+  // Herbalism (herbs) and Mining (ore) — grant to both spendable & lifetime total
+  devAdder("#dev-herb", "#dev-herb-custom", "#dev-herb-add", (v) => grantResource("herb", v));
+  devAdder("#dev-ore", "#dev-ore-custom", "#dev-ore-add", (v) => grantResource("ore", v));
 }
 
 /* =====================================================================
