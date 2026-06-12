@@ -72,7 +72,10 @@
 
     <div class="tab-content hidden" id="tab-research">
       <p class="research-intro">Spend runes on permanent arcane research. Read each effect carefully — multipliers compound!</p>
-      <label class="research-filter"><input type="checkbox" id="hide-purchased" /> Hide purchased upgrades</label>
+      <div class="research-toolbar">
+        <label class="research-filter"><input type="checkbox" id="hide-purchased" /> Hide purchased</label>
+        <button id="research-all" class="ghost-btn small" disabled title="Buy every research you can afford">Research All</button>
+      </div>
       <div id="research-list" class="list"></div>
     </div>
 
@@ -109,6 +112,7 @@
       <div class="subcontent" id="sub-battle">
         <div class="combat">
           <div class="monster" id="monster-target">
+            <div id="boss-timer" class="boss-timer hidden"></div>
             <div class="monster-emoji" id="monster-emoji">👹</div>
             <div class="monster-name" id="monster-name">Lv 1 Fiend</div>
             <div class="hp-bar"><div id="monster-hp-bar"></div></div>
@@ -130,6 +134,7 @@
               <div class="muted">Tap the fireball to cast it and learn spells.</div>
             </div>
           </div>
+          <div id="spell-list" class="spell-list"></div>
 
           <div class="combat-stats">
             <span>⚔ <b id="combat-tapdmg">1</b> / hit</span>
