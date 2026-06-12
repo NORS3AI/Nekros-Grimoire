@@ -203,11 +203,31 @@ const SPELLS = [
   { id:"rage",   name:"Rage",          emoji:"😡", unlock:4, cooldown:25, duration:8,  desc:"Double all your damage for 8s." },
 ];
 function buffActive(id) { return ((state.buffs && state.buffs[id]) || 0) > Date.now(); }
+/* Rank symbols (HTML). Each "set" of 5 ranks shows 1-5 stars plus a secondary
+   shape; the secondary cycles green triangle -> red square -> blue circle ->
+   yellow rectangle, then stacks (2 of each, then 3, ...). */
+const RK_STAR = '<span class="rk star">★</span>';
+const RK_SEC = [
+  '<span class="rk tri">▲</span>',    // green triangle
+  '<span class="rk sq">■</span>',     // red square
+  '<span class="rk circ">●</span>',   // blue circle
+  '<span class="rk rect">▬</span>',   // yellow rectangle
+];
+function rankSetOf(rank) { return Math.floor((rank - 1) / 5); }   // 0 = stars only, 1 = green triangle, ...
 function rankSymbol(rank) {
   if (rank <= 0) return "";
-  if (rank <= 5) return "★".repeat(rank);
-  return "▲".repeat(rank - 5);
+  const set = rankSetOf(rank);
+  const stars = ((rank - 1) % 5) + 1;
+  let out = RK_STAR.repeat(stars);
+  if (set >= 1) {
+    const idx = (set - 1) % RK_SEC.length;
+    const count = Math.floor((set - 1) / RK_SEC.length) + 1;
+    out += RK_SEC[idx].repeat(count);
+  }
+  return out;
 }
+/* extra Survival Runes awarded for earning a rank in the given set: +100/set */
+function rankSrBonus(rank) { return 100 * (rankSetOf(rank) + 1); }
 /* turn an absolute depth into a friendly "★★ Lv 5" label */
 function depthLabel(d) {
   const rank = Math.floor((d - 1) / 100);
@@ -1357,6 +1377,12 @@ function renderStats() {
    ===================================================================== */
 const PATCH_NOTES = [
   {
+    v: "2.10.0", when: "2026-06-12", notes: [
+      "New combat rank insignia: 1–5 ⭐, then a green ▲, then a red ■, a blue ●, a yellow ▬ — and beyond that they stack (2 of each, 3 of each…).",
+      "Clearing 100 levels now also grants bonus Survival Runes for the symbol earned: +100 per star set, +200 in the green-triangle set, +300 red square, +400 blue circle, +500 yellow rectangle, +100 more each new set.",
+    ],
+  },
+  {
     v: "2.9.1", when: "2026-06-12", notes: [
       "Combat Forge and Tactics each have a Buy All button that spends your gold cheapest-first.",
     ],
@@ -1903,10 +1929,12 @@ function ensurePlayer() {
 }
 function rankUp() {
   state.combatRank++;
+  // earning a new symbol grants extra Survival Runes (+100 per set tier)
+  state.survivalRunes += rankSrBonus(state.combatRank);
   state.monsterLevel = 1;
   state.playerHp = null;       // refilled by ensurePlayer at the new max
   bossDeadline = 0;
-  combatDirty = true;          // HP/regen scale with rank
+  dirty = true; combatDirty = true;   // SR held boosts rune gain & combat damage
 }
 function killMonster() {
   state.gold += CBT.goldDrop(state.monsterLevel, state.combatRank) * cd.goldMult;
@@ -2143,7 +2171,7 @@ function renderCombatBattle() {
   const boss = CBT.isBoss(state.monsterLevel);
   const sym = rankSymbol(state.combatRank);
   $("#monster-emoji").textContent = boss ? "🐉" : "👹";
-  $("#monster-name").textContent = (sym ? sym + " " : "") + (boss ? "BOSS — Lv " : "Lv ") + fmt(state.monsterLevel) + (boss ? "" : " Fiend");
+  $("#monster-name").innerHTML = (sym ? sym + " " : "") + (boss ? "BOSS — Lv " : "Lv ") + fmt(state.monsterLevel) + (boss ? "" : " Fiend");
   $("#monster-hp").textContent = fmt(Math.max(0, Math.ceil(state.monsterHp)));
   $("#monster-hp-max").textContent = fmt(maxHp);
   $("#monster-hp-bar").style.width = Math.max(0, 100 * state.monsterHp / maxHp) + "%";
