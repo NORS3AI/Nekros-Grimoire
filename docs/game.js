@@ -182,6 +182,7 @@ const TAPS_PER_RESOURCE = 10;   // herbalism / mining
    level 1. 5 stars -> a green triangle tier (rank 6+). */
 const RANK_MULT = 4;            // each rank's ceiling is this much higher ("harder")
 const BOSS_TIME_MS = 10000;    // bosses must be defeated within 10 seconds
+const BOSS_SR_REWARD = 3;      // Survival Runes per boss (normal enemies grant none)
 const CBT = {
   depth:     () => state.combatRank * 100 + state.monsterLevel,   // monotonic progress metric
   isBoss:    (lvl) => lvl % 10 === 0,                             // lvl = within-rank level (1-100)
@@ -1294,6 +1295,12 @@ function renderStats() {
    ===================================================================== */
 const PATCH_NOTES = [
   {
+    v: "2.7.1", when: "2026-06-12", notes: [
+      "Combat now shows the kill reward (gold, plus Survival Runes on bosses) for the current monster.",
+      "Bosses now grant 3 Survival Runes (normal enemies grant none).",
+    ],
+  },
+  {
     v: "2.7.0", when: "2026-06-12", notes: [
       "Combat Tactics are now repeatable with infinite levels — each repurchase stacks its multiplier again (cost x8 per level).",
       "Ascending to a new star/triangle now wipes your Forge and Tactics (rank, Survival Runes, talents and magic are kept), so each rank is a fresh climb.",
@@ -1806,7 +1813,7 @@ function rankUp() {
 function killMonster() {
   state.gold += CBT.goldDrop(state.monsterLevel, state.combatRank) * cd.goldMult;
   if (state.monsterLevel % 10 === 0) {
-    state.survivalRunes += 1 + (state.combatTalents.survivor | 0);  // Survival Runes only from bosses
+    state.survivalRunes += BOSS_SR_REWARD + (state.combatTalents.survivor | 0);  // bosses only
     bossDeadline = 0;
     dirty = true; combatDirty = true;   // SR held boosts rune gain & combat damage
   }
@@ -2006,6 +2013,9 @@ function renderCombatBattle() {
   } else timerEl.classList.add("hidden");
   $("#combat-gold").textContent = fmt(state.gold);
   $("#combat-sr").textContent = fmt(state.survivalRunes);
+  // gold (and SR for bosses) earned for defeating the current monster
+  const reward = Math.ceil(CBT.goldDrop(state.monsterLevel, state.combatRank) * cd.goldMult);
+  $("#kill-reward").textContent = "⟡ " + fmt(reward) + " gold" + (boss ? "  +🜂 " + fmt(BOSS_SR_REWARD + (state.combatTalents.survivor | 0)) + " SR" : "");
   $("#combat-tapdmg").textContent = fmt(cd.tapDmg);
   $("#combat-dps").textContent = fmt(cd.dps);
   const critEl = $("#combat-crit");
