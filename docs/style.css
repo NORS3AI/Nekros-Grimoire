@@ -627,3 +627,11 @@ body {
 
 .research-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
 .ghost-btn.small { width: auto; margin-top: 0; padding: 5px 12px; font-size: 0.78rem; }
+
+/* ===== Mining ore name & combat hint ===== */
+.ore-name { font-weight: 700; color: var(--ink); font-size: 0.95rem; }
+.combat-hint {
+  margin: 4px 0; padding: 8px 12px; border-radius: 10px;
+  background: rgba(255,214,107,0.12); border: 1px solid var(--gold);
+  color: var(--gold); font-size: 0.82rem; text-align: center; max-width: 340px;
+}
