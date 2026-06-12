@@ -581,3 +581,8 @@ body {
   35%  { transform: translate(-50%, -18px) scale(1.05); }
   100% { transform: translate(-50%, -90px) scale(1.1); opacity: 0; }
 }
+
+/* ===== Talent header (Hide maxed) & VR held bonus ===== */
+.talent-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 10px 0 8px; }
+.talent-head h3 { margin: 0; }
+.good-text { color: var(--good); font-size: 0.82rem; }

@@ -304,11 +304,15 @@
       <div class="modal-body">
         <div class="void-summary">
           <div class="vr-balance-line">Void Runes: <b id="vr-balance">0</b></div>
+          <div id="vr-held-bonus" class="good-text"></div>
           <div id="vr-gain-line" class="muted"></div>
           <button class="rebirth-do" id="do-rebirth">Rebirth</button>
         </div>
         <p class="muted" id="rebirth-warning"></p>
-        <h3>Talents</h3>
+        <div class="talent-head">
+          <h3>Talents</h3>
+          <label class="research-filter"><input type="checkbox" id="hide-maxed-talents" /> Hide maxed</label>
+        </div>
         <div id="talent-list" class="list"></div>
         <button class="ghost-btn" id="begin-anew">Begin Anew</button>
       </div>
