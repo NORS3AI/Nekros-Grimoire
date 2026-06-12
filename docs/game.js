@@ -295,6 +295,7 @@ let state = {
     muteMusic: false,
     muteSfx: false,
     hidePurchased: false,
+    hideMaxedTalents: false,
   },
 
   // dev control panel overrides
@@ -407,6 +408,11 @@ function recompute() {
   // ----- profession bonuses (scale with LIFETIME gathered × Potency) -----
   allPct += profBonusPer("herb") * (state.herbsTotal || 0);  // herbs boost all rune gain
   tapPct += profBonusPer("ore") * (state.oresTotal || 0);    // ore boosts tap power
+
+  // ----- Void Runes held: +10% tap & idle rune gain each -----
+  const vrBonusPct = 10 * (state.vr | 0);
+  tapPct += vrBonusPct;
+  idlePct += vrBonusPct;
 
   // additive bonuses first
   const tapAdd  = PROF_ADD * state.proficiency * profAddMult;
@@ -1184,6 +1190,12 @@ function renderStats() {
    ===================================================================== */
 const PATCH_NOTES = [
   {
+    v: "2.4.0", when: "2026-06-12", notes: [
+      "Void Runes now give a passive bonus just for holding them: +10% tap and idle rune gain each (10 VR = +100%).",
+      "The Void talent tree has a “Hide maxed” checkbox.",
+    ],
+  },
+  {
     v: "2.3.1", when: "2026-06-12", notes: [
       "Mega crits now keep climbing past x50 — all the way to x500 at a 500-crit streak.",
       "Dev panel: tap multiplier and Comprehension now take a custom amount, plus new +1/+5/+10/custom adders for Void Runes, Herbs and Ore.",
@@ -1477,6 +1489,10 @@ function openRebirth(forced) {
 
 function renderRebirth() {
   $("#vr-balance").textContent = fmt(state.vr);
+  const heldPct = 10 * (state.vr | 0);
+  $("#vr-held-bonus").textContent = heldPct > 0
+    ? `Holding them grants +${fmt(heldPct)}% tap & idle rune gain`
+    : "Each Void Rune held grants +10% tap & idle rune gain";
   const gain = pendingVrGain();
   const doBtn = $("#do-rebirth");
   doBtn.textContent = `Rebirth — gain ${fmt(gain)} Void Rune${gain === 1 ? "" : "s"}`;
@@ -1492,10 +1508,12 @@ function renderRebirth() {
 
 function renderTalents() {
   const list = $("#talent-list");
+  const hideMaxed = !!(state.settings && state.settings.hideMaxedTalents);
   list.innerHTML = "";
   for (const t of TALENTS) {
     const L = talentLevel(t.id);
     const maxed = L >= talentMax(t);
+    if (hideMaxed && maxed) continue;
     const cost = talentCost(t);
     const affordable = !maxed && state.vr >= cost;
     const btn = document.createElement("button");
@@ -1532,6 +1550,12 @@ function initRebirthUI() {
   $("#do-rebirth").addEventListener("click", performRebirth);
   $("#begin-anew").addEventListener("click", () => { rebirthForced = false; closeModal(); });
   $("#rebirth-btn").addEventListener("click", () => openRebirth(false));
+  const hideMaxed = $("#hide-maxed-talents");
+  hideMaxed.checked = !!state.settings.hideMaxedTalents;
+  hideMaxed.addEventListener("change", () => {
+    state.settings.hideMaxedTalents = hideMaxed.checked;
+    renderTalents();
+  });
 }
 
 function checkForcedRebirth() {
