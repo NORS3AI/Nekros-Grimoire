@@ -325,11 +325,11 @@ const PROFS = {
     bonusKind: "all", bonusBase: 0.1, bonusPer: 0.05, bonusLabel: "all rune gain",
     upgrades: [
       { id: "yield",     name: "Forager's Yield", base: 8,    growth: 1.20,         fx:{yieldAdd:1},    desc: "+1 herb per gather." },
-      { id: "auto",      name: "Wild Growth",     base: 25,   growth: 1.22,         fx:{autoAdd:0.2},   desc: "+0.2 herbs per second." },
+      { id: "auto",      name: "Wild Growth",     base: 25,   growth: 1.22,         fx:{autoAdd:1},     desc: "Auto-tap +1 per second." },
       { id: "speed",     name: "Quick Hands",     base: 40,   growth: 1.55, max: 9, fx:{speed:1},       desc: "−1 tap needed per herb (min 1)." },
       { id: "potency",   name: "Potency",         base: 30,   growth: 1.28,         fx:{potency:0.05},  desc: "+0.05% all rune gain per herb gathered." },
       { id: "harvest",   name: "Bountiful Harvest", base: 400, growth: 1.27,        fx:{yieldAdd:5},    desc: "+5 herbs per gather." },
-      { id: "greenhouse",name: "Greenhouse",      base: 600,  growth: 1.30,         fx:{autoAdd:2},     desc: "+2 herbs per second." },
+      { id: "greenhouse",name: "Greenhouse",      base: 600,  growth: 1.30,         fx:{autoAdd:5},     desc: "Auto-tap +5 per second." },
       { id: "master",    name: "Master Forager",  base: 5000, growth: 1.45, max: 12,fx:{yieldMult:1.5}, desc: "x1.5 herbs per gather." },
       { id: "distill",   name: "Distillation",    base: 5000, growth: 1.35,         fx:{potency:0.2},   desc: "+0.2% all rune gain per herb gathered." },
     ],
@@ -339,11 +339,11 @@ const PROFS = {
     bonusKind: "tap", bonusBase: 0.2, bonusPer: 0.1, bonusLabel: "runes per tap",
     upgrades: [
       { id: "yield",     name: "Rich Veins",  base: 8,    growth: 1.20,         fx:{yieldAdd:0.2},  desc: "+0.2 ore per mine." },
-      { id: "auto",      name: "Auto-Drill",  base: 25,   growth: 1.22,         fx:{autoAdd:0.2},   desc: "+0.2 ore per second." },
+      { id: "auto",      name: "Auto-Drill",  base: 25,   growth: 1.22,         fx:{autoAdd:1},     desc: "Auto-tap +1 per second (toward mining)." },
       { id: "speed",     name: "Heavy Pick",  base: 40,   growth: 1.55, max: 9, fx:{speed:1},       desc: "−1 tap needed per ore (min 1)." },
       { id: "potency",   name: "Refinement",  base: 30,   growth: 1.28,         fx:{potency:0.1},   desc: "+0.1% runes per tap per ore mined." },
       { id: "motherlode",name: "Motherlode",  base: 400,  growth: 1.27,         fx:{yieldAdd:5},    desc: "+5 ore per mine." },
-      { id: "powerdrill",name: "Power Drill", base: 600,  growth: 1.30,         fx:{autoAdd:2},     desc: "+2 ore per second." },
+      { id: "powerdrill",name: "Power Drill", base: 600,  growth: 1.30,         fx:{autoAdd:5},     desc: "Auto-tap +5 per second (toward mining)." },
       { id: "foreman",   name: "Foreman",     base: 5000, growth: 1.45, max: 12,fx:{yieldMult:1.5}, desc: "x1.5 ore per mine." },
       { id: "smelting",  name: "Smelting",    base: 5000, growth: 1.35,         fx:{potency:0.2},   desc: "+0.2% runes per tap per ore mined." },
     ],
@@ -1388,6 +1388,11 @@ function renderStats() {
    ===================================================================== */
 const PATCH_NOTES = [
   {
+    v: "2.12.0", when: "2026-06-12", notes: [
+      "Auto-Drill / Wild Growth now auto-tap toward gathering (counting toward the taps an ore/herb needs) instead of granting the resource directly — so they respect yield, gold ore, and Heavy Pick.",
+    ],
+  },
+  {
     v: "2.11.2", when: "2026-06-12", notes: [
       "Herbalism/Mining now show yield per gather (not per tap), so a yield upgrade like Rich Veins (+0.2) shows the exact amount it adds.",
     ],
@@ -1901,37 +1906,45 @@ function grantResource(kind, amount) {
   state[p.total] += amount;
   dirty = true; // lifetime total feeds the global bonus
 }
-function gatherProfession(kind) {
-  if (kind === "ore") return mineOre();
-  const p = PROFS[kind];
-  state[p.prog] = (state[p.prog] | 0) + 1;
-  if (state[p.prog] >= profTapsNeeded(kind)) {
-    state[p.prog] = 0;
-    grantResource(kind, profYield(kind));
-  }
-  Sound.tap(false);
-  renderProfession(kind);
-}
-/* each ore mined is a weighted random roll (Copper 80% / Iron 12% / Silver 5% /
-   Gold 3%). Gold Ore takes 3x taps and grants 100 combat gold instead. */
-function mineOre() {
-  state.oreProgress = (state.oreProgress | 0) + 1;
-  if (state.oreProgress >= oreTapsNeeded()) {
-    state.oreProgress = 0;
+function tapsNeededFor(kind) { return kind === "ore" ? oreTapsNeeded() : profTapsNeeded(kind); }
+/* hand out the reward for one completed gather. Ore is a weighted random roll
+   (Copper 80% / Iron 12% / Silver 5% / Gold 3%); Gold Ore grants 100 combat
+   gold only and the next ore is then rolled. */
+function completeGather(kind) {
+  if (kind === "ore") {
     const ore = currentOre();
     if (ore.gold) { state.gold += GOLD_ORE_REWARD; combatDirty = true; }   // Gold Ore: combat gold only, no ore
     else grantResource("ore", ore.mult * profYield("ore"));               // Copper x3, Iron x7, Silver x20
     state.oreCycle = pickOreIndex();   // roll the next ore
+  } else {
+    grantResource(kind, profYield(kind));
   }
-  Sound.tap(false);
-  renderProfession("ore");
 }
-/* idle auto-gather, from real elapsed time (incl. background) */
+/* add `taps` worth of progress (manual taps or auto-tapping), completing as
+   many gathers as the progress crosses */
+function progressGather(kind, taps) {
+  const p = PROFS[kind];
+  state[p.prog] = (state[p.prog] | 0) + taps;
+  let guard = 0;
+  while (guard++ < 100000) {
+    const need = tapsNeededFor(kind);
+    if (state[p.prog] < need) break;
+    state[p.prog] -= need;
+    completeGather(kind);
+  }
+}
+function gatherProfession(kind) {
+  progressGather(kind, 1);
+  Sound.tap(false);
+  renderProfession(kind);
+}
+/* auto upgrades (Auto-Drill / Wild Growth) now contribute taps per second
+   toward gathering, rather than granting the resource directly */
 function accrueProfessions(sec) {
   let changed = false;
   ["herb", "ore"].forEach(kind => {
-    const auto = profAutoPerSec(kind);
-    if (auto > 0) { grantResource(kind, auto * sec); changed = true; }
+    const tapsPerSec = profAutoPerSec(kind);
+    if (tapsPerSec > 0) { progressGather(kind, tapsPerSec * sec); changed = true; }
   });
   return changed;
 }
