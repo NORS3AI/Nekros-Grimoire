@@ -424,6 +424,7 @@ let state = {
     muteSfx: false,
     hidePurchased: false,
     hideMaxedTalents: false,
+    autoAttackBosses: false,
   },
 
   // dev control panel overrides
@@ -1396,6 +1397,11 @@ function renderStats() {
    ===================================================================== */
 const PATCH_NOTES = [
   {
+    v: "2.12.2", when: "2026-06-12", notes: [
+      "Combat: added an “Auto-attack bosses” toggle — turn it on to let auto-attack engage bosses without waiting for your tap.",
+    ],
+  },
+  {
     v: "2.12.1", when: "2026-06-12", notes: [
       "Gold can no longer run away to infinity: the gold-boost Tactics (Plunder, Fortune) are now additive (+50% / +120% per level) instead of multiplying, so gold scales sanely. Gold also has a hard finite cap, and saves stuck at ∞ are rescued.",
     ],
@@ -2144,9 +2150,11 @@ function accrueCombat(sec) {
   if (combatDirty) recomputeCombat();
   ensureMonster();
   bossTimerCheck(Date.now());
-  // auto-attack pauses on a boss until the player taps it to initiate the fight
-  const bossWaiting = CBT.isBoss(state.monsterLevel) && !bossDeadline;
+  // auto-attack pauses on a boss until the player taps it (unless the
+  // "auto-attack bosses" option is enabled)
+  const bossWaiting = CBT.isBoss(state.monsterLevel) && !bossDeadline && !state.settings.autoAttackBosses;
   if (cd.dps > 0 && !bossWaiting) {
+    if (state.settings.autoAttackBosses) engageBoss(Date.now());   // auto-engage starts the timer
     let dmg = cd.dps * rageMult() * sec, guard = 0;
     while (dmg > 0 && guard < 100000) {
       if (dmg >= state.monsterHp) { dmg -= state.monsterHp; state.monsterHp = 0; killMonster(); guard++; }
@@ -2421,6 +2429,9 @@ function initProfessionsUI() {
   $("#monster-target").addEventListener("pointerdown", (e) => { e.preventDefault(); tapMonster(e); });
   $("#fireball-target").addEventListener("pointerdown", (e) => { e.preventDefault(); tapFireball(e); });
   $("#do-retreat").addEventListener("click", doRetreat);
+  const autoBoss = $("#auto-boss-toggle");
+  autoBoss.checked = !!state.settings.autoAttackBosses;
+  autoBoss.addEventListener("change", () => { state.settings.autoAttackBosses = autoBoss.checked; });
   $("#herb-buy-all").addEventListener("click", () => buyAllProf("herb"));
   $("#ore-buy-all").addEventListener("click", () => buyAllProf("ore"));
   $("#forge-buy-all").addEventListener("click", buyAllForge);
