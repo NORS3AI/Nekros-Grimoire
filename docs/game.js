@@ -338,7 +338,7 @@ const PROFS = {
     name: "Mining", emoji: "🪨", res: "ores", total: "oresTotal", prog: "oreProgress", up: "oreUp",
     bonusKind: "tap", bonusBase: 0.2, bonusPer: 0.1, bonusLabel: "runes per tap",
     upgrades: [
-      { id: "yield",     name: "Rich Veins",  base: 8,    growth: 1.20,         fx:{yieldAdd:1},    desc: "+1 ore per mine." },
+      { id: "yield",     name: "Rich Veins",  base: 8,    growth: 1.20,         fx:{yieldAdd:0.2},  desc: "+0.2 ore per mine." },
       { id: "auto",      name: "Auto-Drill",  base: 25,   growth: 1.22,         fx:{autoAdd:0.2},   desc: "+0.2 ore per second." },
       { id: "speed",     name: "Heavy Pick",  base: 40,   growth: 1.55, max: 9, fx:{speed:1},       desc: "−1 tap needed per ore (min 1)." },
       { id: "potency",   name: "Refinement",  base: 30,   growth: 1.28,         fx:{potency:0.1},   desc: "+0.1% runes per tap per ore mined." },
@@ -1388,6 +1388,12 @@ function renderStats() {
    ===================================================================== */
 const PATCH_NOTES = [
   {
+    v: "2.11.0", when: "2026-06-12", notes: [
+      "Herbalism and Mining now have a Buy All button (cheapest-first).",
+      "Rich Veins now adds +0.2 ore per mine per level (still infinite).",
+    ],
+  },
+  {
     v: "2.10.5", when: "2026-06-12", notes: [
       "Gold Ore grants only combat gold again (no ore).",
     ],
@@ -1916,6 +1922,24 @@ function buyProfUp(kind, u) {
   Sound.buy();
   renderProfession(kind);
 }
+/* buy as many profession upgrades as the resource allows, cheapest first */
+function buyAllProf(kind) {
+  const p = PROFS[kind];
+  let bought = 0, guard = 0;
+  while (guard++ < 100000) {
+    let best = null, bestCost = Infinity;
+    for (const u of p.upgrades) {
+      if (u.max && profUpLevel(kind, u.id) >= u.max) continue;
+      const c = profUpCost(kind, u);
+      if (c <= state[p.res] && c < bestCost) { best = u; bestCost = c; }
+    }
+    if (!best) break;
+    state[p.res] -= bestCost;
+    state[p.up][best.id] = profUpLevel(kind, best.id) + 1;
+    bought++;
+  }
+  if (bought > 0) { dirty = true; Sound.buy(); renderProfession(kind); }
+}
 function renderProfession(kind) {
   if (dirty) recompute();
   const p = PROFS[kind];
@@ -2347,6 +2371,8 @@ function initProfessionsUI() {
   $("#monster-target").addEventListener("pointerdown", (e) => { e.preventDefault(); tapMonster(e); });
   $("#fireball-target").addEventListener("pointerdown", (e) => { e.preventDefault(); tapFireball(e); });
   $("#do-retreat").addEventListener("click", doRetreat);
+  $("#herb-buy-all").addEventListener("click", () => buyAllProf("herb"));
+  $("#ore-buy-all").addEventListener("click", () => buyAllProf("ore"));
   $("#forge-buy-all").addEventListener("click", buyAllForge);
   $("#tactics-buy-all").addEventListener("click", buyAllTactics);
   document.querySelectorAll("#tab-combat .subtab").forEach(s =>
