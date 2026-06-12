@@ -258,6 +258,20 @@ const COMBAT_TALENTS = [
 ];
 function combatUpCost(u) { return Math.ceil(u.base * Math.pow(u.growth, (state.combatUp[u.id] | 0))); }
 function combatTalentCost(t) { return Math.ceil(t.cost * Math.pow(t.growth || 1, (state.combatTalents[t.id] | 0))); }
+
+/* Mining cycles through these ore types. Gold Ore is special: it takes 3x the
+   taps and grants 100 combat gold instead of the ore resource. */
+const ORE_TYPES = [
+  { id:"copper", name:"Copper Ore", emoji:"🟤" },
+  { id:"iron",   name:"Iron Ore",   emoji:"⚙️" },
+  { id:"silver", name:"Silver Ore", emoji:"⚪" },
+  { id:"gold",   name:"Gold Ore",   emoji:"🪙", gold:true },
+];
+const GOLD_ORE_TAP_MULT = 3;   // gold ore takes 3x as many taps
+const GOLD_ORE_REWARD = 100;   // ...and grants 100 combat gold
+function currentOre() { return ORE_TYPES[(state.oreCycle | 0) % ORE_TYPES.length]; }
+function oreTapsNeeded() { return profTapsNeeded("ore") * (currentOre().gold ? GOLD_ORE_TAP_MULT : 1); }
+
 // Tactics are repeatable (infinite levels); each repurchase costs much more
 const COMBAT_RESEARCH_GROWTH = 8;
 function combatResearchCost(r) { return Math.ceil(r.cost * Math.pow(COMBAT_RESEARCH_GROWTH, (state.combatResearch[r.id] | 0))); }
@@ -321,7 +335,7 @@ let state = {
 
   // professions (unlocked via talents; kept across rebirth)
   herbs: 0, herbsTotal: 0, herbProgress: 0, herbUp: {},
-  ores: 0, oresTotal: 0, oreProgress: 0, oreUp: {},
+  ores: 0, oresTotal: 0, oreProgress: 0, oreUp: {}, oreCycle: 0,
 
   // combat sub-game (unlocked via talent; kept across Grimoire rebirth)
   gold: 0,
@@ -935,7 +949,7 @@ function load() {
     const num = (k) => { if (typeof state[k] !== "number") state[k] = 0; };
     ["playTimeMs", "rebirths", "totalRunes", "totalTaps", "vr", "vrEarned",
      "herbs", "herbsTotal", "herbProgress", "ores", "oresTotal", "oreProgress",
-     "survivalRunes", "gold", "combatRank", "magicLevel", "magicProgress"].forEach(num);
+     "survivalRunes", "gold", "combatRank", "magicLevel", "magicProgress", "oreCycle"].forEach(num);
     // older saves: seed lifetime totals from current counts so the bonus persists
     if (!s.herbsTotal && state.herbs > 0) state.herbsTotal = state.herbs;
     if (!s.oresTotal && state.ores > 0) state.oresTotal = state.ores;
@@ -1294,6 +1308,13 @@ function renderStats() {
    Patch Notes  — keep newest at the top; add an entry with every patch.
    ===================================================================== */
 const PATCH_NOTES = [
+  {
+    v: "2.8.0", when: "2026-06-12", notes: [
+      "Mining now cycles through Copper, Iron and Silver Ore (each adds to your ore), then Gold Ore — which takes 3x the taps and grants 100 combat gold instead.",
+      "A boss's 10-second timer now starts only once you begin attacking it, not before.",
+      "When you run out of time on a boss, the game now suggests mining Gold Ore for gold — or, if Mining isn't unlocked yet, studying the Grimoire for Void Runes.",
+    ],
+  },
   {
     v: "2.7.1", when: "2026-06-12", notes: [
       "Combat now shows the kill reward (gold, plus Survival Runes on bosses) for the current monster.",
@@ -1728,6 +1749,7 @@ function grantResource(kind, amount) {
   dirty = true; // lifetime total feeds the global bonus
 }
 function gatherProfession(kind) {
+  if (kind === "ore") return mineOre();
   const p = PROFS[kind];
   state[p.prog] = (state[p.prog] | 0) + 1;
   if (state[p.prog] >= profTapsNeeded(kind)) {
@@ -1736,6 +1758,20 @@ function gatherProfession(kind) {
   }
   Sound.tap(false);
   renderProfession(kind);
+}
+/* mining cycles Copper -> Iron -> Silver -> Gold. Gold Ore takes 3x taps and
+   grants 100 combat gold instead of the ore resource. */
+function mineOre() {
+  state.oreProgress = (state.oreProgress | 0) + 1;
+  if (state.oreProgress >= oreTapsNeeded()) {
+    state.oreProgress = 0;
+    const ore = currentOre();
+    if (ore.gold) { state.gold += GOLD_ORE_REWARD; combatDirty = true; }
+    else grantResource("ore", profYield("ore"));
+    state.oreCycle = ((state.oreCycle | 0) + 1) % ORE_TYPES.length;
+  }
+  Sound.tap(false);
+  renderProfession("ore");
 }
 /* idle auto-gather, from real elapsed time (incl. background) */
 function accrueProfessions(sec) {
@@ -1761,11 +1797,17 @@ function renderProfession(kind) {
   if (dirty) recompute();
   const p = PROFS[kind];
   const pre = kind === "herb" ? "#herb" : "#ore";
+  const taps = kind === "ore" ? oreTapsNeeded() : profTapsNeeded(kind);
   $(pre + "-count").textContent = fmt(Math.floor(state[p.res]));
-  $(pre + "-bar").style.width = (100 * (state[p.prog] | 0) / profTapsNeeded(kind)) + "%";
+  $(pre + "-bar").style.width = (100 * (state[p.prog] | 0) / taps) + "%";
   // effective amount earned per individual tap = yield / taps-needed
   $(pre + "-pertap").textContent = fmt(Math.round((profYield(kind) / profTapsNeeded(kind)) * 100) / 100);
   $(pre + "-auto").textContent = fmt(profAutoPerSec(kind));
+  if (kind === "ore") {
+    const ore = currentOre();
+    $("#ore-target").textContent = ore.emoji;
+    $("#ore-name").textContent = ore.name + (ore.gold ? ` (3x taps → +${GOLD_ORE_REWARD} combat gold)` : "");
+  }
   const bonus = profBonusPer(kind) * (state[p.total] || 0);
   $(pre + "-bonus").textContent = "+" + (Math.round(bonus * 100) / 100) + "% " + p.bonusLabel;
   // upgrades (spent with the resource)
@@ -1815,6 +1857,7 @@ function killMonster() {
   if (state.monsterLevel % 10 === 0) {
     state.survivalRunes += BOSS_SR_REWARD + (state.combatTalents.survivor | 0);  // bosses only
     bossDeadline = 0;
+    bossFailed = false;
     dirty = true; combatDirty = true;   // SR held boosts rune gain & combat damage
   }
   state.monsterLevel++;
@@ -1836,22 +1879,29 @@ function playerDefeated() {
   state.playerHp = cd.playerMaxHp;
   bossDeadline = 0;
 }
-/* boss 10-second kill timer. Returns remaining ms (or 0 when not a boss). */
-let bossDeadline = 0;
+/* boss 10-second kill timer — starts only once the player begins attacking. */
+let bossDeadline = 0;        // 0 = boss not engaged yet
+let bossFailed = false;      // true after a boss times out (drives the hint)
+function engageBoss(now) {   // first hit on a boss starts the countdown
+  if (CBT.isBoss(state.monsterLevel) && !bossDeadline) bossDeadline = now + BOSS_TIME_MS;
+}
 function bossTimerCheck(now) {
-  if (!CBT.isBoss(state.monsterLevel)) { bossDeadline = 0; return 0; }
-  if (!bossDeadline) bossDeadline = now + BOSS_TIME_MS;
-  if (now > bossDeadline) {                       // ran out of time -> boss fully heals, retry
+  if (!CBT.isBoss(state.monsterLevel)) { bossDeadline = 0; bossFailed = false; return -1; }
+  if (!bossDeadline) return BOSS_TIME_MS;          // engaged not yet started — full time, not counting
+  if (now > bossDeadline) {                        // ran out of time -> boss fully heals, await re-engage
     state.monsterHp = CBT.monsterHp(state.monsterLevel, state.combatRank);
-    bossDeadline = now + BOSS_TIME_MS;
+    bossDeadline = 0;
+    bossFailed = true;
   }
-  return Math.max(0, bossDeadline - now);
+  return bossDeadline ? Math.max(0, bossDeadline - now) : BOSS_TIME_MS;
 }
 function rageMult() { return buffActive("rage") ? 2 : 1; }
 function tapMonster(ev) {
   if (combatDirty) recomputeCombat();
   ensureMonster();
-  bossTimerCheck(Date.now());
+  const now = Date.now();
+  bossTimerCheck(now);
+  engageBoss(now);
   let dmg = cd.tapDmg * rageMult(), crit = false;
   if (cd.critMult > 0 && Math.random() < cd.critChance) { dmg *= cd.critMult; crit = true; }
   state.monsterHp -= dmg;
@@ -1864,7 +1914,9 @@ function tapFireball(ev) {
   if (state.combatRank < 6) return;
   if (combatDirty) recomputeCombat();
   ensureMonster();
-  bossTimerCheck(Date.now());
+  const now = Date.now();
+  bossTimerCheck(now);
+  engageBoss(now);
   const dmg = cd.magicDamage * rageMult();
   state.monsterHp -= dmg;
   spawnCombatFloat(ev, dmg, false, true);
@@ -1896,6 +1948,7 @@ function accrueCombat(sec) {
   ensureMonster();
   bossTimerCheck(Date.now());
   if (cd.dps > 0) {
+    engageBoss(Date.now());   // auto-attack also counts as attacking
     let dmg = cd.dps * rageMult() * sec, guard = 0;
     while (dmg > 0 && guard < 100000) {
       if (dmg >= state.monsterHp) { dmg -= state.monsterHp; state.monsterHp = 0; killMonster(); guard++; }
@@ -2003,14 +2056,22 @@ function renderCombatBattle() {
   $("#monster-hp").textContent = fmt(Math.max(0, Math.ceil(state.monsterHp)));
   $("#monster-hp-max").textContent = fmt(maxHp);
   $("#monster-hp-bar").style.width = Math.max(0, 100 * state.monsterHp / maxHp) + "%";
-  // boss 10s timer
+  // boss 10s timer (starts only when the player attacks)
   const timerEl = $("#boss-timer");
   if (boss) {
     const left = bossTimerCheck(Date.now());
     timerEl.classList.remove("hidden");
-    timerEl.textContent = "⏱ " + (left / 1000).toFixed(1) + "s";
-    timerEl.classList.toggle("urgent", left < 4000);
+    timerEl.textContent = bossDeadline ? "⏱ " + (left / 1000).toFixed(1) + "s" : "⏱ 10s — attack to begin!";
+    timerEl.classList.toggle("urgent", bossDeadline && left < 4000);
   } else timerEl.classList.add("hidden");
+  // recommendation when a boss can't be beaten in time
+  const hintEl = $("#combat-hint");
+  if (boss && bossFailed) {
+    hintEl.classList.remove("hidden");
+    hintEl.textContent = hasProfession("mining")
+      ? "Out of time! Mine Gold Ore (in the Mining tab) for extra combat gold to power up."
+      : "Out of time! Keep studying the Grimoire to earn Void Runes and grow stronger.";
+  } else hintEl.classList.add("hidden");
   $("#combat-gold").textContent = fmt(state.gold);
   $("#combat-sr").textContent = fmt(state.survivalRunes);
   // gold (and SR for bosses) earned for defeating the current monster
