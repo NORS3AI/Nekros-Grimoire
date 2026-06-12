@@ -297,10 +297,10 @@ function combatTalentCost(t) { return Math.ceil(t.cost * Math.pow(t.growth || 1,
 /* Each ore mined is a weighted random roll. Gold Ore is special: it takes 3x
    the taps and grants 100 combat gold instead of the ore resource. */
 const ORE_TYPES = [
-  { id:"copper", name:"Copper Ore", emoji:"🟤", weight:80 },
-  { id:"iron",   name:"Iron Ore",   emoji:"⚙️", weight:12 },
-  { id:"silver", name:"Silver Ore", emoji:"⚪", weight:5 },
-  { id:"gold",   name:"Gold Ore",   emoji:"🪙", weight:3, gold:true },
+  { id:"copper", name:"Copper Ore", emoji:"🟤", weight:80, mult:3 },
+  { id:"iron",   name:"Iron Ore",   emoji:"⚙️", weight:12, mult:7 },
+  { id:"silver", name:"Silver Ore", emoji:"⚪", weight:5,  mult:20 },
+  { id:"gold",   name:"Gold Ore",   emoji:"🪙", weight:3,  gold:true },
 ];
 const GOLD_ORE_TAP_MULT = 3;   // gold ore takes 3x as many taps
 const GOLD_ORE_REWARD = 100;   // ...and grants 100 combat gold
@@ -1382,6 +1382,12 @@ function renderStats() {
    ===================================================================== */
 const PATCH_NOTES = [
   {
+    v: "2.10.2", when: "2026-06-12", notes: [
+      "Auto-attack now waits on a boss until you tap it to start the fight.",
+      "Ore yields by type: Copper x3, Iron x7, Silver x20 (Gold still gives 100 combat gold).",
+    ],
+  },
+  {
     v: "2.10.1", when: "2026-06-12", notes: [
       "Mining now rolls a random ore each time instead of cycling — 80% Copper, 12% Iron, 5% Silver, 3% Gold.",
     ],
@@ -1863,7 +1869,7 @@ function mineOre() {
     state.oreProgress = 0;
     const ore = currentOre();
     if (ore.gold) { state.gold += GOLD_ORE_REWARD; combatDirty = true; }
-    else grantResource("ore", profYield("ore"));
+    else grantResource("ore", ore.mult * profYield("ore"));   // Copper x3, Iron x7, Silver x20
     state.oreCycle = pickOreIndex();   // roll the next ore
   }
   Sound.tap(false);
@@ -1902,7 +1908,9 @@ function renderProfession(kind) {
   if (kind === "ore") {
     const ore = currentOre();
     $("#ore-target").textContent = ore.emoji;
-    $("#ore-name").textContent = ore.name + (ore.gold ? ` (3x taps → +${GOLD_ORE_REWARD} combat gold)` : "");
+    $("#ore-name").textContent = ore.name + (ore.gold
+      ? ` (3x taps → +${GOLD_ORE_REWARD} combat gold)`
+      : ` (+${fmt(Math.round(ore.mult * profYield("ore") * 100) / 100)} ore)`);
   }
   const bonus = profBonusPer(kind) * (state[p.total] || 0);
   $(pre + "-bonus").textContent = "+" + (Math.round(bonus * 100) / 100) + "% " + p.bonusLabel;
@@ -2041,8 +2049,9 @@ function accrueCombat(sec) {
   if (combatDirty) recomputeCombat();
   ensureMonster();
   bossTimerCheck(Date.now());
-  if (cd.dps > 0) {
-    engageBoss(Date.now());   // auto-attack also counts as attacking
+  // auto-attack pauses on a boss until the player taps it to initiate the fight
+  const bossWaiting = CBT.isBoss(state.monsterLevel) && !bossDeadline;
+  if (cd.dps > 0 && !bossWaiting) {
     let dmg = cd.dps * rageMult() * sec, guard = 0;
     while (dmg > 0 && guard < 100000) {
       if (dmg >= state.monsterHp) { dmg -= state.monsterHp; state.monsterHp = 0; killMonster(); guard++; }
