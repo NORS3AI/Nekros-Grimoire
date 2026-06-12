@@ -206,6 +206,13 @@ function rankSymbol(rank) {
   if (rank <= 5) return "★".repeat(rank);
   return "▲".repeat(rank - 5);
 }
+/* turn an absolute depth into a friendly "★★ Lv 5" label */
+function depthLabel(d) {
+  const rank = Math.floor((d - 1) / 100);
+  const level = d - rank * 100;
+  const sym = rankSymbol(rank);
+  return (sym ? sym + " " : "") + "Lv " + level;
+}
 function magicReq(level) { return 25 * Math.pow(2, level); } // 25, 50, 100, 200, ...
 
 /* Forge upgrades (bought with Gold). minRank gates the new tiers. */
@@ -317,7 +324,8 @@ let state = {
   survivalRunes: 0,
   monsterLevel: 1,       // within the current rank (1-100)
   combatRank: 0,         // 0 base, 1-5 stars, 6+ green triangles
-  highestLevel: 1,       // highest absolute depth reached
+  highestLevel: 1,       // highest depth reached this climb (resets on Retreat; gates Tactics)
+  combatBest: 1,         // highest depth ever reached (never resets)
   monsterHp: null,       // current HP of the active monster (filled on first view)
   playerHp: null,        // player HP (★ tier and beyond)
   magicLevel: 0,         // fireball / spell level (▲ tier)
@@ -397,7 +405,9 @@ function recomputeCombat() {
   // ★ stats: agility (dodge), strength (damage), vitality (HP/regen); ▲ intellect (magic)
   const agi = lv("agility"), str = lv("strength"), vit = lv("vitality"), intel = lv("intellect");
 
-  const strengthMult = (1 + 0.003 * str);
+  // Survival Runes held: +10% combat damage each
+  const srDmgMult = 1 + 0.10 * (state.survivalRunes | 0);
+  const strengthMult = (1 + 0.003 * str) * srDmgMult;
   cd.tapDmg = tapAdd * dmgMult * allMult * (1 + dmgPct / 100) * strengthMult;
   cd.dps = autoAdd * dpsMult * allMult * (1 + dpsPct / 100) * strengthMult;
   cd.critChance = Math.min(0.9, critChance);
@@ -407,7 +417,7 @@ function recomputeCombat() {
   cd.dodge = Math.min(0.9, (0.001 * agi) * dodgeMult);
   cd.playerMaxHp = (60 + 40 * vit) * (1 + 0.5 * state.combatRank);
   cd.regen = Math.max(1, (60 + 40 * vit) * 0.03 + 2 * vit);
-  cd.magicDamage = (2 + intel + (state.magicLevel | 0)) * magicMult;   // +1 per magic level
+  cd.magicDamage = (2 + intel + (state.magicLevel | 0)) * magicMult * srDmgMult;   // +1 per magic level
   cd.atkReduce = atkReduce;
   combatDirty = false;
 }
@@ -469,6 +479,9 @@ function recompute() {
   const vrBonusPct = 10 * (state.vr | 0);
   tapPct += vrBonusPct;
   idlePct += vrBonusPct;
+
+  // ----- Survival Runes held: +1% all rune gain each -----
+  allPct += 1 * (state.survivalRunes | 0);
 
   // additive bonuses first
   const tapAdd  = PROF_ADD * state.proficiency * profAddMult;
@@ -925,6 +938,9 @@ function load() {
     if (typeof state.buyMode !== "number") state.buyMode = 1;
     if (typeof state.monsterLevel !== "number" || state.monsterLevel < 1) state.monsterLevel = 1;
     if (typeof state.highestLevel !== "number" || state.highestLevel < state.monsterLevel) state.highestLevel = state.monsterLevel;
+    if (typeof state.combatBest !== "number" || state.combatBest < state.highestLevel) {
+      state.combatBest = Math.max(state.highestLevel | 0, (state.combatRank | 0) * 100 + state.monsterLevel);
+    }
     // migrate the old single sword upgrade into the new Forge
     if (typeof s.swordLevel === "number" && s.swordLevel > 0 && !state.combatUp.sharpen) state.combatUp.sharpen = s.swordLevel;
     return true;
@@ -1250,6 +1266,7 @@ function renderStats() {
     row("Survival Runes", fmt(state.survivalRunes));
     const sym = rankSymbol(state.combatRank);
     row("Combat", (sym ? sym + " " : "") + "Lv " + fmt(state.monsterLevel) + " (depth " + fmt(CBT.depth()) + ")");
+    row("Highest combat reached", depthLabel(state.combatBest) + " (depth " + fmt(state.combatBest) + ")");
     if (state.magicLevel > 0) row("Magic level", fmt(state.magicLevel));
   }
 
@@ -1273,6 +1290,13 @@ function renderStats() {
    Patch Notes  — keep newest at the top; add an entry with every patch.
    ===================================================================== */
 const PATCH_NOTES = [
+  {
+    v: "2.6.1", when: "2026-06-12", notes: [
+      "Herbalism & Mining now show how much you earn per tap (alongside per second).",
+      "Combat now tracks and shows your highest depth ever reached (persists through Retreat) using a ★/▲ Lv label.",
+      "Held Survival Runes now grant +10% combat damage each and +1% to all normal rune gain each.",
+    ],
+  },
   {
     v: "2.6.0", when: "2026-06-12", notes: [
       "Bosses now have a 10-second kill timer — fail and the boss heals to full and the timer resets (a DPS check).",
@@ -1719,6 +1743,8 @@ function renderProfession(kind) {
   const pre = kind === "herb" ? "#herb" : "#ore";
   $(pre + "-count").textContent = fmt(Math.floor(state[p.res]));
   $(pre + "-bar").style.width = (100 * (state[p.prog] | 0) / profTapsNeeded(kind)) + "%";
+  // effective amount earned per individual tap = yield / taps-needed
+  $(pre + "-pertap").textContent = fmt(Math.round((profYield(kind) / profTapsNeeded(kind)) * 100) / 100);
   $(pre + "-auto").textContent = fmt(profAutoPerSec(kind));
   const bonus = profBonusPer(kind) * (state[p.total] || 0);
   $(pre + "-bonus").textContent = "+" + (Math.round(bonus * 100) / 100) + "% " + p.bonusLabel;
@@ -1765,11 +1791,13 @@ function killMonster() {
   if (state.monsterLevel % 10 === 0) {
     state.survivalRunes += 1 + (state.combatTalents.survivor | 0);  // Survival Runes only from bosses
     bossDeadline = 0;
+    dirty = true; combatDirty = true;   // SR held boosts rune gain & combat damage
   }
   state.monsterLevel++;
   if (state.monsterLevel > 100) rankUp();                        // cleared a century -> +1 star
   const nd = CBT.depth();
   if (nd > state.highestLevel) state.highestLevel = nd;
+  if (nd > (state.combatBest | 0)) state.combatBest = nd;
   state.monsterHp = CBT.monsterHp(state.monsterLevel, state.combatRank);
   if (state.monsterLevel % 10 === 0) bossDeadline = 0;           // a fresh boss -> new timer
   // small heal between fights at the ★/▲ tiers
@@ -1902,6 +1930,7 @@ function buyCombatTalent(t) {
   state.survivalRunes -= cost;
   state.combatTalents[t.id] = L + 1;
   combatDirty = true;
+  dirty = true;          // spending SR changes the held-SR rune bonus
   Sound.buy();
   renderCombatRetreat();
 }
@@ -2040,7 +2069,10 @@ function renderCombatRetreat() {
   const btn = $("#do-retreat");
   btn.textContent = "Retreat — restart the climb";
   btn.disabled = state.combatRank === 0 && state.monsterLevel <= 1;
-  $("#retreat-info").innerHTML = `Depth reached: <b>${fmt(CBT.depth())}</b> (best ${fmt(state.highestLevel)}). Survival Runes come from <b>bosses</b>. Retreat resets gold, rank, Forge & Tactics so you can re-farm bosses — you keep Survival Runes and talents.`;
+  const sr = state.survivalRunes | 0;
+  $("#retreat-info").innerHTML = `Now at <b>${depthLabel(CBT.depth())}</b> (depth ${fmt(CBT.depth())}). Highest ever: <b>${depthLabel(state.combatBest)}</b>.<br>` +
+    `Holding Survival Runes grants <b class="good-text">+${fmt(10 * sr)}% combat damage</b> and <b class="good-text">+${fmt(sr)}% rune gain</b>.<br>` +
+    `Survival Runes come from <b>bosses</b>. Retreat resets gold, rank, Forge & Tactics so you can re-farm bosses — you keep Survival Runes and talents.`;
   const list = $("#combat-talent-list");
   list.innerHTML = "";
   for (const t of COMBAT_TALENTS) {
