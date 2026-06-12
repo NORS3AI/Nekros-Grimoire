@@ -216,6 +216,38 @@ const COMBAT_TALENTS = [
 function combatUpCost(u) { return Math.ceil(u.base * Math.pow(u.growth, (state.combatUp[u.id] | 0))); }
 function combatTalentCost(t) { return Math.ceil(t.cost * Math.pow(t.growth || 1, (state.combatTalents[t.id] | 0))); }
 
+/* ---------- professions: Herbalism & Mining (each a small idle game) ----------
+   Resource (herbs / ore) is spent on the profession's own upgrades. The global
+   bonus scales with LIFETIME gathered, so spending never lowers it. */
+const PROFS = {
+  herb: {
+    name: "Herbalism", emoji: "🌿", res: "herbs", total: "herbsTotal", prog: "herbProgress", up: "herbUp",
+    bonusKind: "all", bonusBase: 0.1, bonusPer: 0.05, bonusLabel: "all rune gain",
+    upgrades: [
+      { id: "yield",   name: "Forager's Yield", base: 8,  growth: 1.20,          desc: "+1 herb per gather." },
+      { id: "auto",    name: "Wild Growth",     base: 25, growth: 1.22,          desc: "+0.2 herbs per second." },
+      { id: "speed",   name: "Quick Hands",     base: 40, growth: 1.55, max: 9,  desc: "−1 tap needed per herb (min 1)." },
+      { id: "potency", name: "Potency",         base: 30, growth: 1.28,          desc: "+0.05% all rune gain per herb gathered (lifetime)." },
+    ],
+  },
+  ore: {
+    name: "Mining", emoji: "🪨", res: "ores", total: "oresTotal", prog: "oreProgress", up: "oreUp",
+    bonusKind: "tap", bonusBase: 0.2, bonusPer: 0.1, bonusLabel: "runes per tap",
+    upgrades: [
+      { id: "yield",   name: "Rich Veins",  base: 8,  growth: 1.20,          desc: "+1 ore per mine." },
+      { id: "auto",    name: "Auto-Drill",  base: 25, growth: 1.22,          desc: "+0.2 ore per second." },
+      { id: "speed",   name: "Heavy Pick",  base: 40, growth: 1.55, max: 9,  desc: "−1 tap needed per ore (min 1)." },
+      { id: "potency", name: "Refinement",  base: 30, growth: 1.28,          desc: "+0.1% runes per tap per ore mined (lifetime)." },
+    ],
+  },
+};
+function profUpLevel(kind, id) { return state[PROFS[kind].up][id] | 0; }
+function profUpCost(kind, u) { return Math.ceil(u.base * Math.pow(u.growth, profUpLevel(kind, u.id))); }
+function profTapsNeeded(kind) { return Math.max(1, TAPS_PER_RESOURCE - profUpLevel(kind, "speed")); }
+function profYield(kind) { return 1 + profUpLevel(kind, "yield"); }
+function profAutoPerSec(kind) { return 0.2 * profUpLevel(kind, "auto"); }
+function profBonusPer(kind) { const p = PROFS[kind]; return p.bonusBase + p.bonusPer * profUpLevel(kind, "potency"); }
+
 /* ---------- game state ---------- */
 let state = {
   runes: 0,
@@ -242,8 +274,8 @@ let state = {
   buyMode: 1,            // 1, 5, or Infinity (Buy All)
 
   // professions (unlocked via talents; kept across rebirth)
-  herbs: 0, herbProgress: 0,
-  ores: 0, oreProgress: 0,
+  herbs: 0, herbsTotal: 0, herbProgress: 0, herbUp: {},
+  ores: 0, oresTotal: 0, oreProgress: 0, oreUp: {},
 
   // combat sub-game (unlocked via talent; kept across Grimoire rebirth)
   gold: 0,
@@ -371,9 +403,9 @@ function recompute() {
     if (t.special === "vrpower") allPct += 5 * L * (state.vrEarned | 0);
   }
 
-  // ----- profession bonuses (gathered resources give a small permanent edge) -----
-  allPct += 0.1 * (state.herbs | 0);   // herbs boost all rune gain
-  tapPct += 0.2 * (state.ores | 0);    // ore boosts tap power
+  // ----- profession bonuses (scale with LIFETIME gathered × Potency) -----
+  allPct += profBonusPer("herb") * (state.herbsTotal || 0);  // herbs boost all rune gain
+  tapPct += profBonusPer("ore") * (state.oresTotal || 0);    // ore boosts tap power
 
   // additive bonuses first
   const tapAdd  = PROF_ADD * state.proficiency * profAddMult;
@@ -649,11 +681,12 @@ function syncList(listEl, items) {
     if (listEl.children[idx] !== entry.btn) listEl.insertBefore(entry.btn, listEl.children[idx] || null);
   });
 }
-/* same reconciler, but affordability is measured against Gold (combat) */
-function syncListGold(listEl, items) {
-  items.forEach(i => { i.data.have = state.gold; });
+/* same reconciler, but affordability is measured against a given balance */
+function syncListWith(listEl, items, have) {
+  items.forEach(i => { i.data.have = have; });
   syncList(listEl, items);
 }
+function syncListGold(listEl, items) { syncListWith(listEl, items, state.gold); }
 
 function renderUpgrades() {
   if (dirty) recompute();
@@ -767,13 +800,19 @@ function load() {
     state.combatUp = s.combatUp || {};
     state.combatResearch = s.combatResearch || {};
     state.combatTalents = s.combatTalents || {};
+    state.herbUp = s.herbUp || {};
+    state.oreUp = s.oreUp || {};
     // merge nested objects so older saves still get new fields
     state.settings = { ...defaults.settings, ...(s.settings || {}) };
     state.dev = { ...defaults.dev, ...(s.dev || {}) };
     // numeric/back-compat defaults for fields added later
     const num = (k) => { if (typeof state[k] !== "number") state[k] = 0; };
     ["playTimeMs", "rebirths", "totalRunes", "totalTaps", "vr", "vrEarned",
-     "herbs", "herbProgress", "ores", "oreProgress", "survivalRunes", "gold"].forEach(num);
+     "herbs", "herbsTotal", "herbProgress", "ores", "oresTotal", "oreProgress",
+     "survivalRunes", "gold"].forEach(num);
+    // older saves: seed lifetime totals from current counts so the bonus persists
+    if (!s.herbsTotal && state.herbs > 0) state.herbsTotal = state.herbs;
+    if (!s.oresTotal && state.ores > 0) state.oresTotal = state.ores;
     if (typeof state.buyMode !== "number") state.buyMode = 1;
     if (typeof state.monsterLevel !== "number" || state.monsterLevel < 1) state.monsterLevel = 1;
     if (typeof state.highestLevel !== "number" || state.highestLevel < state.monsterLevel) state.highestLevel = state.monsterLevel;
@@ -819,7 +858,8 @@ function accrueIdle() {
   if (d.idlePerSec > 0) addRunes(d.idlePerSec * sec);
 }
 
-/* combat auto-attack accrues from real elapsed time too (incl. background) */
+/* combat auto-attack & profession auto-gather accrue from real elapsed time
+   too (incl. background) */
 let lastCombat = Date.now();
 function accrueCombatTick() {
   const now = Date.now();
@@ -828,6 +868,7 @@ function accrueCombatTick() {
   if (sec <= 0) return;
   sec = Math.min(sec, OFFLINE_CAP_SEC);
   accrueCombat(sec);
+  accrueProfessions(sec);
 }
 
 /* ---------- main loop ---------- */
@@ -853,6 +894,8 @@ function loop(now) {
     updateTabsVisibility();
     if (!$("#research-tab").disabled) renderResearch();
     if (!$("#tab-combat").classList.contains("hidden")) renderCombat();
+    if (!$("#tab-herbalism").classList.contains("hidden")) renderProfession("herb");
+    if (!$("#tab-mining").classList.contains("hidden")) renderProfession("ore");
     if (!$("#modal-overlay").classList.contains("hidden") && !$("#modal-stats").classList.contains("hidden")) renderStats();
   }
   requestAnimationFrame(loop);
@@ -912,17 +955,10 @@ const Sound = (() => {
 
   const muted = () => state.settings.muteAll;
 
-  let tapStep = 0;
   function tap(crit) {
     if (muted()) return; ensure(); if (!ctx) return;
-    // wandering pentatonic pluck so rapid tapping stays musical
-    const semi = PENTA[tapStep % PENTA.length] + 12 * ((tapStep / PENTA.length | 0) % 2);
-    tapStep = (tapStep + 1) % 10;
-    tone({ freq: noteHz(semi), type: "triangle", dur: 0.16, gain: 0.16 });
-    if (crit) {
-      tone({ freq: noteHz(semi + 12), type: "sine", dur: 0.3, gain: 0.14, t: ctx.currentTime + 0.04 });
-      tone({ freq: noteHz(semi + 19), type: "sine", dur: 0.35, gain: 0.1, t: ctx.currentTime + 0.09 });
-    }
+    // a single soft, low note — same every tap so rapid tapping isn't grating
+    tone({ freq: crit ? 130.81 : 164.81, type: "sine", dur: crit ? 0.22 : 0.11, gain: crit ? 0.2 : 0.13 });
   }
 
   function buy() {
@@ -1119,6 +1155,12 @@ function renderStats() {
    Patch Notes  — keep newest at the top; add an entry with every patch.
    ===================================================================== */
 const PATCH_NOTES = [
+  {
+    v: "2.2.0", when: "2026-06-12", notes: [
+      "Herbalism & Mining are now proper idle games: each has Yield, Auto-gather, Speed and Potency upgrades bought with the resource itself, and the global bonus now scales with everything you've ever gathered (so spending it never lowers the bonus). Resources keep gathering in the background.",
+      "Softened the tap sound — it's now a single low, gentle note instead of a rising high-pitched chime.",
+    ],
+  },
   {
     v: "2.1.0", when: "2026-06-12", notes: [
       "Combat is now a full idle/clicker game with its own loop: tap to strike, auto-attack chips away on its own (even in the background), and monsters drop Gold. Every 10th foe is a boss.",
@@ -1432,26 +1474,65 @@ function updateTabsVisibility() {
 }
 
 /* =====================================================================
-   Professions: Herbalism & Mining (10 taps per resource)
+   Professions: Herbalism & Mining (each a small idle game)
    ===================================================================== */
+function grantResource(kind, amount) {
+  const p = PROFS[kind];
+  state[p.res] += amount;
+  state[p.total] += amount;
+  dirty = true; // lifetime total feeds the global bonus
+}
 function gatherProfession(kind) {
-  const progKey = kind === "herb" ? "herbProgress" : "oreProgress";
-  const countKey = kind === "herb" ? "herbs" : "ores";
-  state[progKey] = (state[progKey] | 0) + 1;
-  if (state[progKey] >= TAPS_PER_RESOURCE) {
-    state[progKey] = 0;
-    state[countKey] = (state[countKey] | 0) + 1;
-    dirty = true; // resource bonuses feed recompute
+  const p = PROFS[kind];
+  state[p.prog] = (state[p.prog] | 0) + 1;
+  if (state[p.prog] >= profTapsNeeded(kind)) {
+    state[p.prog] = 0;
+    grantResource(kind, profYield(kind));
   }
   Sound.tap(false);
   renderProfession(kind);
 }
+/* idle auto-gather, from real elapsed time (incl. background) */
+function accrueProfessions(sec) {
+  let changed = false;
+  ["herb", "ore"].forEach(kind => {
+    const auto = profAutoPerSec(kind);
+    if (auto > 0) { grantResource(kind, auto * sec); changed = true; }
+  });
+  return changed;
+}
+function buyProfUp(kind, u) {
+  const p = PROFS[kind];
+  const cost = profUpCost(kind, u);
+  if (state[p.res] < cost) return;
+  if (u.max && profUpLevel(kind, u.id) >= u.max) return;
+  state[p.res] -= cost;
+  state[p.up][u.id] = profUpLevel(kind, u.id) + 1;
+  dirty = true;
+  Sound.buy();
+  renderProfession(kind);
+}
 function renderProfession(kind) {
-  const isHerb = kind === "herb";
-  const count = isHerb ? state.herbs : state.ores;
-  const prog = isHerb ? state.herbProgress : state.oreProgress;
-  $(isHerb ? "#herb-count" : "#ore-count").textContent = fmt(count);
-  $(isHerb ? "#herb-bar" : "#ore-bar").style.width = (100 * prog / TAPS_PER_RESOURCE) + "%";
+  if (dirty) recompute();
+  const p = PROFS[kind];
+  const pre = kind === "herb" ? "#herb" : "#ore";
+  $(pre + "-count").textContent = fmt(Math.floor(state[p.res]));
+  $(pre + "-bar").style.width = (100 * (state[p.prog] | 0) / profTapsNeeded(kind)) + "%";
+  $(pre + "-auto").textContent = fmt(profAutoPerSec(kind));
+  const bonus = profBonusPer(kind) * (state[p.total] || 0);
+  $(pre + "-bonus").textContent = "+" + (Math.round(bonus * 100) / 100) + "% " + p.bonusLabel;
+  // upgrades (spent with the resource)
+  const items = p.upgrades.map(u => {
+    const L = profUpLevel(kind, u.id);
+    const maxed = u.max && L >= u.max;
+    const cost = profUpCost(kind, u);
+    return { key: kind + "-up-" + u.id, data: {
+      name: u.name, levelText: `Lv ${L}${u.max ? "/" + u.max : ""}`, desc: u.desc,
+      cost, costText: `${p.emoji} ${fmt(cost)}`, maxed,
+      onBuy: () => buyProfUp(kind, u),
+    } };
+  });
+  syncListWith($(pre + "-up-list"), items, state[p.res]);
 }
 
 /* =====================================================================

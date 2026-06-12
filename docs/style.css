@@ -561,3 +561,8 @@ body {
 .subcontent { min-height: 0; }
 .monster { position: relative; }
 .monster #combat-float { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+
+/* ===== Profession stats / upgrades ===== */
+.prof-stats { display: flex; gap: 16px; font-size: 0.85rem; color: var(--ink); }
+.prof-bonus { color: var(--good); }
+.prof { padding-bottom: 6px; }
