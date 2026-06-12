@@ -183,6 +183,8 @@ const TAPS_PER_RESOURCE = 10;   // herbalism / mining
 const RANK_MULT = 4;            // each rank's ceiling is this much higher ("harder")
 const BOSS_TIME_MS = 10000;    // bosses must be defeated within 10 seconds
 const BOSS_SR_REWARD = 3;      // Survival Runes per boss (normal enemies grant none)
+const GOLD_CAP = 1e30;         // gold is always finite — never Infinity
+function addGold(v) { state.gold = Math.min(GOLD_CAP, (state.gold || 0) + v); }
 const CBT = {
   depth:     () => state.combatRank * 100 + state.monsterLevel,   // monotonic progress metric
   isBoss:    (lvl) => lvl % 10 === 0,                             // lvl = within-rank level (1-100)
@@ -262,10 +264,10 @@ const COMBAT_UP = [
 /* Tactics research (bought with Gold). unlock = depth; minRank gates new ones. */
 const COMBAT_RESEARCH = [
   { id:"steel",    name:"Steel Edge",  unlock:5,  cost:1500,  fx:{dmgMult:2}, desc:"x2 tap damage." },
-  { id:"plunder",  name:"Plunder",     unlock:8,  cost:6000,  fx:{goldMult:2}, desc:"x2 gold." },
+  { id:"plunder",  name:"Plunder",     unlock:8,  cost:6000,  fx:{goldPct:50}, desc:"+50% gold." },
   { id:"swarm",    name:"Swarm",       unlock:12, cost:30000, fx:{dpsMult:2}, desc:"x2 auto damage." },
   { id:"warlord",  name:"Warlord",     unlock:20, cost:2e5,   fx:{allMult:2}, desc:"x2 ALL damage." },
-  { id:"fortune",  name:"Fortune",     unlock:28, cost:1e6,   fx:{goldMult:3}, desc:"x3 gold." },
+  { id:"fortune",  name:"Fortune",     unlock:28, cost:1e6,   fx:{goldPct:120}, desc:"+120% gold." },
   { id:"berserk",  name:"Berserk",     unlock:38, cost:1e7,   fx:{dmgMult:3}, desc:"x3 tap damage." },
   { id:"legion",   name:"Legion",      unlock:48, cost:1e8,   fx:{dpsMult:3}, desc:"x3 auto damage." },
   { id:"warband",  name:"Warband",     unlock:55, cost:5e8,   fx:{dpsMult:2, dmgMult:2}, desc:"x2 tap & x2 auto damage." },
@@ -469,8 +471,12 @@ function recomputeCombat() {
     if (r.fx.hpMult)    hpMult    *= Math.pow(r.fx.hpMult, L);
     if (r.fx.atkReduce) atkReduce = 1 - (1 - atkReduce) * Math.pow(1 - r.fx.atkReduce / 100, L);
   }
-  // additive-percentage effects (Forge fx + talents)
+  // additive-percentage effects (Forge fx + Tactics gold% + talents)
   let tapPct = 0, dpsPct = 0, allPct = 0, goldPctAdd = 0, hpPct = 0, dodgeFlat = 0, regenPct = 0, magicPct = 0;
+  for (const r of COMBAT_RESEARCH) {
+    const L = state.combatResearch[r.id] | 0;
+    if (L && r.fx && r.fx.goldPct) goldPctAdd += r.fx.goldPct * L;
+  }
   for (const u of COMBAT_UP) {
     const L = lv(u.id); if (!L || !u.fx) continue;
     if (u.fx.tapPct)    tapPct    += u.fx.tapPct * L;
@@ -503,7 +509,8 @@ function recomputeCombat() {
   cd.dps = autoAdd * dpsMult * allMult * (1 + (talDpsPct + dpsPct + allPct) / 100) * strengthMult;
   cd.critChance = Math.min(0.9, critChance);
   cd.critMult = critMult;
-  cd.goldMult = (1 + (goldPct + goldPctAdd + talGoldPct) / 100) * goldMult;
+  // additive gold bonuses (linear, never exponential) with a finite safety cap
+  cd.goldMult = Math.min(1e9, (1 + (goldPct + goldPctAdd + talGoldPct) / 100) * goldMult);
 
   cd.dodge = Math.min(0.9, (0.001 * agi + dodgeFlat / 100) * dodgeMult);
   cd.playerMaxHp = (60 + 40 * vit) * (1 + 0.5 * state.combatRank) * (1 + hpPct / 100) * hpMult;
@@ -1029,6 +1036,7 @@ function load() {
     ["playTimeMs", "rebirths", "totalRunes", "totalTaps", "vr", "vrEarned",
      "herbs", "herbsTotal", "herbProgress", "ores", "oresTotal", "oreProgress",
      "survivalRunes", "gold", "combatRank", "magicLevel", "magicProgress", "oreCycle"].forEach(num);
+    if (!isFinite(state.gold)) state.gold = GOLD_CAP;   // rescue saves stuck at Infinity gold
     // older saves: seed lifetime totals from current counts so the bonus persists
     if (!s.herbsTotal && state.herbs > 0) state.herbsTotal = state.herbs;
     if (!s.oresTotal && state.ores > 0) state.oresTotal = state.ores;
@@ -1388,6 +1396,11 @@ function renderStats() {
    ===================================================================== */
 const PATCH_NOTES = [
   {
+    v: "2.12.1", when: "2026-06-12", notes: [
+      "Gold can no longer run away to infinity: the gold-boost Tactics (Plunder, Fortune) are now additive (+50% / +120% per level) instead of multiplying, so gold scales sanely. Gold also has a hard finite cap, and saves stuck at ∞ are rescued.",
+    ],
+  },
+  {
     v: "2.12.0", when: "2026-06-12", notes: [
       "Auto-Drill / Wild Growth now auto-tap toward gathering (counting toward the taps an ore/herb needs) instead of granting the resource directly — so they respect yield, gold ore, and Heavy Pick.",
     ],
@@ -1716,7 +1729,7 @@ function initDevPanel() {
   devAdder("#dev-herb", "#dev-herb-custom", "#dev-herb-add", (v) => grantResource("herb", v));
   devAdder("#dev-ore", "#dev-ore-custom", "#dev-ore-add", (v) => grantResource("ore", v));
   // Gold (combat)
-  devAdder("#dev-gold", "#dev-gold-custom", "#dev-gold-add", (v) => { state.gold += v; }, [10, 100, 1000]);
+  devAdder("#dev-gold", "#dev-gold-custom", "#dev-gold-add", (v) => { addGold(v); }, [10, 100, 1000]);
 
   // Unlock professions (sets the corresponding Void Rune talent)
   const unlockWrap = $("#dev-unlock");
@@ -1913,7 +1926,7 @@ function tapsNeededFor(kind) { return kind === "ore" ? oreTapsNeeded() : profTap
 function completeGather(kind) {
   if (kind === "ore") {
     const ore = currentOre();
-    if (ore.gold) { state.gold += GOLD_ORE_REWARD; combatDirty = true; }   // Gold Ore: combat gold only, no ore
+    if (ore.gold) { addGold(GOLD_ORE_REWARD); combatDirty = true; }   // Gold Ore: combat gold only, no ore
     else grantResource("ore", ore.mult * profYield("ore"));               // Copper x3, Iron x7, Silver x20
     state.oreCycle = pickOreIndex();   // roll the next ore
   } else {
@@ -2037,7 +2050,7 @@ function rankUp() {
   dirty = true; combatDirty = true;   // SR held boosts rune gain & combat damage
 }
 function killMonster() {
-  state.gold += CBT.goldDrop(state.monsterLevel, state.combatRank) * cd.goldMult;
+  addGold(CBT.goldDrop(state.monsterLevel, state.combatRank) * cd.goldMult);
   if (state.monsterLevel % 10 === 0) {
     state.survivalRunes += BOSS_SR_REWARD + (state.combatTalents.survivor | 0);  // bosses only
     bossDeadline = 0;
