@@ -155,12 +155,18 @@
       </div>
 
       <div class="subcontent hidden" id="sub-forge">
-        <p class="research-intro">Spend <b>gold</b> looted from monsters to forge your power. (Gold: <b id="forge-gold">0</b>)</p>
+        <div class="research-toolbar">
+          <span class="research-intro" style="margin:0">Forge with gold. (Gold: <b id="forge-gold">0</b>)</span>
+          <button id="forge-buy-all" class="ghost-btn small">Buy All</button>
+        </div>
         <div id="forge-list" class="list"></div>
       </div>
 
       <div class="subcontent hidden" id="sub-tactics">
-        <p class="research-intro">Permanent combat research, bought with gold and unlocked by reaching deeper levels. (Gold: <b id="tactics-gold">0</b>)</p>
+        <div class="research-toolbar">
+          <span class="research-intro" style="margin:0">Combat research. (Gold: <b id="tactics-gold">0</b>)</span>
+          <button id="tactics-buy-all" class="ghost-btn small">Buy All</button>
+        </div>
         <div id="tactics-list" class="list"></div>
       </div>
 
