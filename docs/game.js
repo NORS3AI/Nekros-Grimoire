@@ -294,16 +294,21 @@ const COMBAT_TALENTS = [
 function combatUpCost(u) { return Math.ceil(u.base * Math.pow(u.growth, (state.combatUp[u.id] | 0))); }
 function combatTalentCost(t) { return Math.ceil(t.cost * Math.pow(t.growth || 1, (state.combatTalents[t.id] | 0))); }
 
-/* Mining cycles through these ore types. Gold Ore is special: it takes 3x the
-   taps and grants 100 combat gold instead of the ore resource. */
+/* Each ore mined is a weighted random roll. Gold Ore is special: it takes 3x
+   the taps and grants 100 combat gold instead of the ore resource. */
 const ORE_TYPES = [
-  { id:"copper", name:"Copper Ore", emoji:"🟤" },
-  { id:"iron",   name:"Iron Ore",   emoji:"⚙️" },
-  { id:"silver", name:"Silver Ore", emoji:"⚪" },
-  { id:"gold",   name:"Gold Ore",   emoji:"🪙", gold:true },
+  { id:"copper", name:"Copper Ore", emoji:"🟤", weight:80 },
+  { id:"iron",   name:"Iron Ore",   emoji:"⚙️", weight:12 },
+  { id:"silver", name:"Silver Ore", emoji:"⚪", weight:5 },
+  { id:"gold",   name:"Gold Ore",   emoji:"🪙", weight:3, gold:true },
 ];
 const GOLD_ORE_TAP_MULT = 3;   // gold ore takes 3x as many taps
 const GOLD_ORE_REWARD = 100;   // ...and grants 100 combat gold
+function pickOreIndex() {
+  let r = Math.random() * ORE_TYPES.reduce((s, o) => s + o.weight, 0);
+  for (let i = 0; i < ORE_TYPES.length; i++) { r -= ORE_TYPES[i].weight; if (r < 0) return i; }
+  return 0;
+}
 function currentOre() { return ORE_TYPES[(state.oreCycle | 0) % ORE_TYPES.length]; }
 function oreTapsNeeded() { return profTapsNeeded("ore") * (currentOre().gold ? GOLD_ORE_TAP_MULT : 1); }
 
@@ -1377,6 +1382,11 @@ function renderStats() {
    ===================================================================== */
 const PATCH_NOTES = [
   {
+    v: "2.10.1", when: "2026-06-12", notes: [
+      "Mining now rolls a random ore each time instead of cycling — 80% Copper, 12% Iron, 5% Silver, 3% Gold.",
+    ],
+  },
+  {
     v: "2.10.0", when: "2026-06-12", notes: [
       "New combat rank insignia: 1–5 ⭐, then a green ▲, then a red ■, a blue ●, a yellow ▬ — and beyond that they stack (2 of each, 3 of each…).",
       "Clearing 100 levels now also grants bonus Survival Runes for the symbol earned: +100 per star set, +200 in the green-triangle set, +300 red square, +400 blue circle, +500 yellow rectangle, +100 more each new set.",
@@ -1845,8 +1855,8 @@ function gatherProfession(kind) {
   Sound.tap(false);
   renderProfession(kind);
 }
-/* mining cycles Copper -> Iron -> Silver -> Gold. Gold Ore takes 3x taps and
-   grants 100 combat gold instead of the ore resource. */
+/* each ore mined is a weighted random roll (Copper 80% / Iron 12% / Silver 5% /
+   Gold 3%). Gold Ore takes 3x taps and grants 100 combat gold instead. */
 function mineOre() {
   state.oreProgress = (state.oreProgress | 0) + 1;
   if (state.oreProgress >= oreTapsNeeded()) {
@@ -1854,7 +1864,7 @@ function mineOre() {
     const ore = currentOre();
     if (ore.gold) { state.gold += GOLD_ORE_REWARD; combatDirty = true; }
     else grantResource("ore", profYield("ore"));
-    state.oreCycle = ((state.oreCycle | 0) + 1) % ORE_TYPES.length;
+    state.oreCycle = pickOreIndex();   // roll the next ore
   }
   Sound.tap(false);
   renderProfession("ore");
