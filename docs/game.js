@@ -300,7 +300,7 @@ const ORE_TYPES = [
   { id:"copper", name:"Copper Ore", emoji:"🟤", weight:80, mult:3 },
   { id:"iron",   name:"Iron Ore",   emoji:"⚙️", weight:12, mult:7 },
   { id:"silver", name:"Silver Ore", emoji:"⚪", weight:5,  mult:20 },
-  { id:"gold",   name:"Gold Ore",   emoji:"🪙", weight:3,  gold:true },
+  { id:"gold",   name:"Gold Ore",   emoji:"🪙", weight:3,  mult:50, gold:true },
 ];
 const GOLD_ORE_TAP_MULT = 3;   // gold ore takes 3x as many taps
 const GOLD_ORE_REWARD = 100;   // ...and grants 100 combat gold
@@ -1382,6 +1382,11 @@ function renderStats() {
    ===================================================================== */
 const PATCH_NOTES = [
   {
+    v: "2.10.3", when: "2026-06-12", notes: [
+      "Gold Ore now also grants ore (x50), on top of its 100 combat gold.",
+    ],
+  },
+  {
     v: "2.10.2", when: "2026-06-12", notes: [
       "Auto-attack now waits on a boss until you tap it to start the fight.",
       "Ore yields by type: Copper x3, Iron x7, Silver x20 (Gold still gives 100 combat gold).",
@@ -1868,8 +1873,8 @@ function mineOre() {
   if (state.oreProgress >= oreTapsNeeded()) {
     state.oreProgress = 0;
     const ore = currentOre();
-    if (ore.gold) { state.gold += GOLD_ORE_REWARD; combatDirty = true; }
-    else grantResource("ore", ore.mult * profYield("ore"));   // Copper x3, Iron x7, Silver x20
+    grantResource("ore", ore.mult * profYield("ore"));        // Copper x3, Iron x7, Silver x20, Gold x50
+    if (ore.gold) { state.gold += GOLD_ORE_REWARD; combatDirty = true; }   // ...plus 100 combat gold
     state.oreCycle = pickOreIndex();   // roll the next ore
   }
   Sound.tap(false);
@@ -1908,9 +1913,10 @@ function renderProfession(kind) {
   if (kind === "ore") {
     const ore = currentOre();
     $("#ore-target").textContent = ore.emoji;
+    const oreAmt = fmt(Math.round(ore.mult * profYield("ore") * 100) / 100);
     $("#ore-name").textContent = ore.name + (ore.gold
-      ? ` (3x taps → +${GOLD_ORE_REWARD} combat gold)`
-      : ` (+${fmt(Math.round(ore.mult * profYield("ore") * 100) / 100)} ore)`);
+      ? ` (3x taps → +${oreAmt} ore & +${GOLD_ORE_REWARD} combat gold)`
+      : ` (+${oreAmt} ore)`);
   }
   const bonus = profBonusPer(kind) * (state[p.total] || 0);
   $(pre + "-bonus").textContent = "+" + (Math.round(bonus * 100) / 100) + "% " + p.bonusLabel;
